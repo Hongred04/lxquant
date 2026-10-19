@@ -231,10 +231,12 @@ main.main.is-sub{overflow:hidden}
 .view > .hd{display:flex;flex-direction:column;gap:10px;min-height:0;flex:1}
 /* 二级页：.view 不再滚，.hd 自己滚；顶栏 + 本页工具条吸在顶上。
    注意这里是 display:none，必须让当前页的 .active 把它顶回来 —— 少了后半句，
-   点「参数设置 / 策略检验 / 模拟账户 / 使用说明」就是个空白页（这个坑踩过） */
+   点「参数设置 / 策略检验 / 模拟账户 / 使用说明」就是个空白页（这个坑踩过）
+   还有一处坑：下面这条 .hd 的规则曾经误写成 `main.main.is-sub main.main.is-sub .view > .hd`
+   （选择器重复了一截），永远匹配不到，结果二级页根本没有滚动容器 —— 整页滑不动。 */
 main.main.is-sub .view{display:none;flex:1;min-height:0;padding:0 16px;overflow:hidden}
 main.main.is-sub .view.active{display:flex}
-main.main.is-sub main.main.is-sub .view > .hd{flex:1;max-height:none;overflow-y:auto;overflow-x:hidden;margin:0 -16px;padding:0 16px 18px}
+main.main.is-sub .view > .hd{flex:1;max-height:none;overflow-y:auto;overflow-x:hidden;margin:0 -16px;padding:0 16px 18px}
 main.main.is-sub .view > .hd > .topbar{flex:0 0 auto;height:52px;position:sticky;top:0;z-index:7}
 main.main.is-sub .view > .hd > .toolbar{flex:0 0 auto;position:sticky;top:52px;z-index:6;background:var(--bg);border-bottom:1px solid var(--line)}
 #app[data-level="sub"] .view > .toolbar{padding-top:10px}

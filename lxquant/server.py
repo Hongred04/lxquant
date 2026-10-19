@@ -375,7 +375,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._static(p.replace("/static/", "/") if p.startswith("/static") else p)
             if p == "/api/config":
                 return self._json({"ok": True, **config.load_config(),
-                                   "cache": store.cache_info(), "version": "1.8.2"})
+                                   "cache": store.cache_info(), "version": "1.8.3"})
             if p == "/api/job":
                 j = JOBS.get(q.get("id", ""))
                 if not j:
