@@ -95,18 +95,25 @@ def save(w: dict) -> None:
 # ---------------------------------------------------------------- 增删
 def add(code: str, name: str = "", note: str = "") -> dict:
     from . import datasource as ds
+    raw = str(code or "").strip()
+    # 允许直接给名字/部分名字：找到唯一一只就用它，找到多个就报错让你填代码
+    if not (raw.isdigit() and len(raw) == 6):
+        got = find(raw, 3)
+        if not got:
+            raise ValueError(f"没找到「{raw}」这只股票")
+        if len(got) > 1:
+            raise ValueError("「%s」对上了好几只：%s，填代码更准。"
+                             % (raw, "、".join(x["name"] for x in got)))
+        code, name = got[0]["code"], name or got[0]["name"]
     code = ds.norm(str(code or "").strip())
     if not code or not code.isdigit() or len(code) != 6:
         raise ValueError("股票代码不对（要 6 位数字）")
+    # 名字缺了（或只有一个「—」）就补上真名，界面上别显示成一个横杠
+    if not name or str(name).strip() in ("", "—", "-"):
+        name = _name_of(code) or name
     with _LOCK:
         w = load()
         it = w["items"].get(code) or {}
-        # 名字缺了（或只有一个「—」）就补上真名，界面上别显示成一个横杠
-        if not name and (not it.get("name") or str(it.get("name")).strip() in ("", "—", "-")):
-            try:
-                name = _name_of(code)
-            except Exception:
-                name = ""
         it.update({"code": code, "name": name or it.get("name") or "", "added_at": it.get("added_at")
                    or _dt.now().strftime("%Y-%m-%d %H:%M")})
         if note:
@@ -153,16 +160,52 @@ def _num(v):
         return None
 
 
-def _name_of(code: str) -> str:
+def _stock_df():
+    """全市场清单（数据源内部有缓存，别重复拉）。拿不到就返回 None。"""
     from . import datasource as ds
     try:
-        df = ds.stock_list()
-        row = df[df["code"].astype(str) == code]
-        if len(row):
-            return str(row.iloc[0]["name"])
+        return ds.stock_list()
     except Exception:
-        pass
-    return ""
+        return None
+
+
+def _name_of(code: str) -> str:
+    df = _stock_df()
+    if df is None:
+        return ""
+    row = df[df["code"].astype(str) == code]
+    return str(row.iloc[0]["name"]) if len(row) else ""
+
+
+def find(q: str, limit: int = 8) -> list:
+    """按名字或代码找股票：填「茅台」就能找到 600519。
+
+    先用「填的是不是 6 位代码」直接问一次实时行情（最快，也最常用）；
+    不够 6 位才去拉全市场清单按名字筛。
+    """
+    from . import datasource as ds
+    q = str(q or "").strip()
+    if not q:
+        return []
+    if q.isdigit() and len(q) == 6:
+        try:
+            r = ds.realtime([q]).to_dict("records")
+            if r:
+                code, name = str(r[0]["code"]), _name_of(q) or q
+                return [{"code": code, "name": name, "price": r[0].get("price"),
+                         "chg_pct": r[0].get("chg_pct")}]
+        except Exception:
+            pass
+    df = _stock_df()
+    if df is None:
+        return []
+    codes = df["code"].astype(str)
+    names = df["name"].astype(str).fillna("")
+    hit = df[names.str.contains(q, na=False) | codes.str.startswith(q)]
+    out = []
+    for r in hit.sort_values("amount", ascending=False).head(limit).itertuples():
+        out.append({"code": str(r.code), "name": str(r.name), "price": r.price, "chg_pct": r.chg_pct})
+    return out
 
 
 def list_all() -> list:

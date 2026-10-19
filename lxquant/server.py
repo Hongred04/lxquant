@@ -375,7 +375,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._static(p.replace("/static/", "/") if p.startswith("/static") else p)
             if p == "/api/config":
                 return self._json({"ok": True, **config.load_config(),
-                                   "cache": store.cache_info(), "version": "1.8.3"})
+                                   "cache": store.cache_info(), "version": "1.8.4"})
             if p == "/api/job":
                 j = JOBS.get(q.get("id", ""))
                 if not j:
@@ -448,6 +448,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "rows": ds.realtime(codes).to_dict("records")})
             if p == "/api/watch":
                 from . import watchlist
+                # ?q=茅台 → 按名字/代码找股票（前端输入框一边打字一边给候选）
+                if q.get("q"):
+                    return self._json({"ok": True, "rows": watchlist.find(q.get("q"))})
                 w = watchlist.load()
                 return self._json({"ok": True, "items": [w["items"][c] for c in w["items"]],
                                    "check_at": w.get("check_at") or "",

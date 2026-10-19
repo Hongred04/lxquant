@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>lxquant · 量价低位选股</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0e14'/%3E%3Cpath d='M6 22l5-7 4 4 5-9 6 12' stroke='%232fd6a5' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=1.8.3" />
+<link rel="stylesheet" href="style.css?v=1.8.4" />
 </head>
 <body>
 <div id="app">
@@ -33,7 +33,7 @@
 
     <div class="side-foot">
       <div class="stat-line"><span>数据更新到</span><b id="f-data-date">—</b></div>
-      <div class="stat-line"><span>版本</span><b>v1.8.3</b></div>
+      <div class="stat-line"><span>版本</span><b>v1.8.4</b></div>
     </div>
   </aside>
 
@@ -149,13 +149,14 @@
           <b>我的自选股</b>
           <span class="muted" id="w-meta">加进来之后，软件每 3 分钟看一次买点卖点</span>
           <span class="spacer"></span>
-          <input class="search" id="w-code" placeholder="代码，如 600519" style="width:150px" />
+          <input class="search" id="w-code" placeholder="名字或代码，如 茅台" style="width:180px" />
           <button class="btn sm" id="w-add"><i data-ic="plus"></i>加进自选</button>
           <button class="btn sm ghost" id="w-check" title="立刻重新看一遍，不用等 3 分钟">马上检查</button>
           <button class="btn sm ghost" id="w-sound" title="买点卖点弹出来的时候响不响">🔔 声音开</button>
           <button class="btn sm ghost" id="w-clear" title="把右上角还没关的提醒都清掉">清掉提醒</button>
         </div>
         <div class="wl" id="w-list"></div>
+        <div class="whints" id="w-hints" hidden></div>
       </div>
       <div class="panel">
         <div class="ph"><b>这些人气股今天的表现</b><span class="spacer"></span><span class="muted" id="scan-meta"></span></div>
@@ -589,7 +590,7 @@
   </div>
   <div class="mf"><span class="muted" id="wm-foot"></span><span class="spacer"></span><span class="muted">点任意一只看详情 · Esc 关掉</span></div>
 </div>
-<script src="_demo.js?v=1.8.3"></script>
-<script src="app.js?v=1.8.3"></script>
+<script src="_demo.js?v=1.8.4"></script>
+<script src="app.js?v=1.8.4"></script>
 </body>
 </html>

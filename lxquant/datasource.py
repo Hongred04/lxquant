@@ -75,8 +75,20 @@ def is_stock(code: str) -> bool:
 
 
 # ---------------------------------------------------------------- 股票列表
+_LIST_CACHE = (None, 0.0)      # (全市场清单, 拉到的时刻)
+
+
 def stock_list(force: bool = False) -> pd.DataFrame:
-    """全市场 A 股快照（代码 名称 现价 涨跌幅 成交量 成交额 换手率 市盈率 等）"""
+    """全市场 A 股快照（代码 名称 现价 涨跌幅 成交量 成交额 换手率 市盈率 等）
+
+    一页一页翻要拉五十多次请求、二十多秒，所以结果在内存里放着十分钟：
+    自选股输入框靠它按名字找股票，不然每敲一个字都得干等半分钟；
+    选股要最新价会传 force=True 绕开缓存。
+    """
+    if not force:
+        old, at = _LIST_CACHE
+        if old is not None and time.time() - at < 600:
+            return old
     out, page, num = [], 1, 100
     base = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
             "Market_Center.getHQNodeData?page={p}&num={n}&sort=symbol&asc=1&node=hs_a"
@@ -121,7 +133,9 @@ def stock_list(force: bool = False) -> pd.DataFrame:
     if df.empty:
         raise DataError("股票列表获取失败")
     df = df[df["code"].str.len() == 6]
-    return df.reset_index(drop=True)
+    df = df.reset_index(drop=True)
+    globals()["_LIST_CACHE"] = (df, time.time())   # 赋值要在 globals() 里，不然会变成局部变量
+    return df
 
 
 def _f(v):

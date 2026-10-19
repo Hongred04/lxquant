@@ -501,8 +501,6 @@ function openDetailModal(tab) {
   // 点行看详情时抽屉盖上来，关掉抽屉后弹窗还在原处
   setTimeout(() => $('#wm-close') && $('#wm-close').focus(), 30);
 }
-/** 兼容旧调用：原来只用来弹「值得盯着」 */
-function openWatchModal() { openDetailModal('watch'); }
 function closeWatchModal() {
   S.watchModalOpen = false;
   $('#watch-modal').hidden = true;
@@ -1074,7 +1072,9 @@ async function checkWatchlist(force = true) {
 
 async function addWatch(code, name) {
   code = String(code || '').trim();
-  if (!/^\d{6}$/.test(code)) { toast('要填 6 位股票代码', true); return; }
+  // 名字也行（后端会去找）；代码就照旧要 6 位
+  if (!code) { toast('填个股票名字或代码', true); return; }
+  if (/^\d+$/.test(code) && code.length !== 6) { toast('代码要 6 位，或者直接填名字', true); return; }
   try {
     const j = await api('/api/watch/add', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1111,9 +1111,18 @@ function bindWatchlistPanel() {
     const inp = $('#w-code');
     addWatch(inp && inp.value);
     if (inp) inp.value = '';
+    showHints([]);
   };
   box.addEventListener('click', e => {
     if (e.target.closest('#w-add')) { add(); return; }
+    const pick = e.target.closest('[data-wpick]');
+    if (pick) {
+      addWatch(pick.dataset.wpick);
+      const i = $('#w-code');
+      if (i) i.value = '';
+      showHints([]);
+      return;
+    }
     if (e.target.closest('#w-check')) { checkWatchlist(true); return; }
     if (e.target.closest('#w-clear')) {
       api('/api/alerts/ack', {
@@ -1141,8 +1150,31 @@ function bindWatchlistPanel() {
     if (row && !e.target.closest('button') && row.dataset.code) openDetail(row.dataset.code);
   });
   const inp = $('#w-code');
-  if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+  if (inp) {
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+    // 一边打字一边给候选：只给名字有重叠的那几只，点一个就加进去
+    let t = 0;
+    inp.addEventListener('input', () => {
+      clearTimeout(t);
+      const q = inp.value.trim();
+      if (!q) { showHints([]); return; }
+      t = setTimeout(async () => {
+        try {
+          const j = await api('/api/watch?q=' + encodeURIComponent(q));
+          if (inp.value.trim() === q) showHints(j.rows || []);
+        } catch (_) { showHints([]); }
+      }, 300);
+    });
+  }
   syncSoundBtn();
+}
+
+/** 输入框下面那排候选字（点一下就加进自选） */
+function showHints(rows) {
+  const box = $('#w-hints');
+  if (!box) return;
+  box.innerHTML = rows.map(r => `<button class="wh" data-wpick="${esc(r.code)}">${esc(r.name)}<em>${esc(r.code)}</em></button>`).join('');
+  box.hidden = !rows.length;
 }
 
 function syncSoundBtn() {

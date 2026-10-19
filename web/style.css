@@ -415,10 +415,6 @@ html[data-theme="light"] .hl.warn{border-left-color:rgba(192,125,16,.5);backgrou
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column}
 .ph{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
 .ph b{font-weight:600}
-.legend{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--txt-3)}
-.dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
-.dot.ok{background:var(--ok)}
-.dot.no{background:var(--dot-no)}
 
 .tablewrap{overflow:auto;max-height:calc(100vh - 330px)}
 table.grid{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
@@ -490,9 +486,6 @@ tr.empty:hover{background:transparent!important}
 .checks.warn{counter-reset:ck}
 .checks.warn .ck{counter-increment:ck}
 .checks.warn .ck::after{content:counter(ck);font-size:8px;opacity:.6;margin-left:1px}
-/* "还差什么"那列可能很长，允许换行并给个最小宽度，别把整张表撑到横向滚动 */
-td.whycell{white-space:normal;min-width:160px;max-width:340px;line-height:1.45;
-  font-size:11px;color:var(--warn)}
 
 /* 条件漏斗 */
 .funnel-bar{display:flex;gap:6px;align-items:stretch;flex-wrap:wrap}
@@ -771,6 +764,13 @@ html[data-theme="light"] .alert.sell .al-tag{background:rgba(10,150,110,.09)}
 /* ---------------- 自选股（盯盘页里那一块） ----------------
    一行一只：谁 / 现价涨跌 / 五关打勾 / 把握度 / 该买该卖 / 止损目标 / 按钮 */
 .wl{display:flex;flex-direction:column;max-height:calc(100vh - 420px);min-height:150px;overflow:auto}
+/* 输入框下面的候选：点一个就加进自选 */
+.whints{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px}
+.whints[hidden]{display:none}
+.wh{border:1px solid var(--line-2);background:var(--panel-2);color:var(--txt);border-radius:7px;
+  padding:4px 9px;font-size:12px;cursor:pointer;font-family:inherit}
+.wh em{font-style:normal;color:var(--txt-3);margin-left:6px;font-size:11px}
+.wh:hover{border-color:var(--btn-hover-line);background:var(--btn-hover-bg)}
 /* 这里的 5 个勾只画「五关」（站上成本 / 筹码 / 位置 / 结构 / 趋势），
    和弹窗里数「差几关」是同一套。后端多给的 close_ma / tail 不是关，不画，
    不然一行五个勾里会有两个是常亮的，看着像"过了两关"。 */
