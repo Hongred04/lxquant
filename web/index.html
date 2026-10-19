@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>lxquant · 量价低位选股</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0e14'/%3E%3Cpath d='M6 22l5-7 4 4 5-9 6 12' stroke='%232fd6a5' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css?v=1.8.2" />
+</head>
+<body>
+<div id="app">
+  <!-- ============ 侧边栏 ============ -->
+  <aside class="side">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M3 17l4.5-6 3.5 3.5L15 7l6 11" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <div class="bname">lxquant</div>
+        <div class="bsub">量价低位选股</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="ni active" data-view="screen"><i data-ic="target"></i><span>选股</span></button>
+      <button class="ni" data-view="watch"><i data-ic="grid"></i><span>盯盘 / 自选</span></button>
+      <button class="ni" data-view="backtest"><i data-ic="chart"></i><span>策略检验</span></button>
+      <button class="ni" data-view="portfolio"><i data-ic="wallet"></i><span>模拟账户</span></button>
+      <button class="ni sub" data-view="memory"><i data-ic="memory"></i><span>记忆</span></button>
+      <button class="ni sub" data-view="method"><i data-ic="book"></i><span>使用说明</span></button>
+      <button class="ni sub" data-view="settings"><i data-ic="sliders"></i><span>参数设置</span></button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="stat-line"><span>数据更新到</span><b id="f-data-date">—</b></div>
+      <div class="stat-line"><span>版本</span><b>v1.8.2</b></div>
+    </div>
+  </aside>
+
+  <!-- ============ 主区域 ============ -->
+  <main class="main" id="app-main">
+    <!-- 整条页面头（顶栏 + 本页工具条）都住在各页 .view > .hd 里：
+         真正的 #topbar 由 mountTopbar() 搬进当前页面的那个空 <header> 位置 -->
+    <header class="topbar" id="topbar">
+      <div class="tb-left">
+        <h1 id="view-title">选股</h1>
+        <span class="tb-hint" id="view-hint">软件自己会选，你回来直接看名单就行</span>
+        <!-- 从主页面钻进来的二级页（策略检验 / 模拟账户 / 使用说明 / 参数设置）显示这条面包屑，一键退回主页面 -->
+        <nav class="crumb" id="crumb" hidden>
+          <button class="crumb-back" id="crumb-back"><i data-ic="back"></i>操作台</button>
+          <span class="crumb-sep">/</span>
+          <b id="crumb-name">—</b>
+        </nav>
+      </div>
+      <div class="tb-right" id="tb-actions">
+        <span class="auto-pill" id="auto-pill" title="自动选股状态：开盘自动扫、盘中每 5 分钟扫、14:50 给出最终名单">
+          <i class="ap-dot"></i><b>自动选股</b><span id="auto-txt">准备中…</span>
+        </span>
+      </div>
+      <button class="icon-btn theme-btn" id="theme-btn" title="切换亮色 / 暗色主题">
+        <i data-ic="moon"></i>
+      </button>
+    </header>
+
+    <!-- ---------- 选股视图 ---------- -->
+    <section class="view active" id="view-screen">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <label class="inl">看多少只
+          <select id="limit-sel">
+            <option value="0" selected>自动（跟着参数走）</option>
+            <option value="600">600 只 · 约 40 秒</option>
+            <option value="1500">1500 只 · 约 2 分钟</option>
+            <option value="6000">全部 5500 只 · 约 8 分钟</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-run" title="平时不用点，软件会自己选"><i data-ic="play"></i>立即选股</button>
+        <button class="btn ghost" id="btn-stop" hidden><i data-ic="stop"></i>停止</button>
+        <span class="spacer"></span>
+        <input class="search" id="q" placeholder="代码 / 名称搜索" />
+        <button class="btn ghost" id="btn-export"><i data-ic="download"></i>导出CSV</button>
+      </div>
+
+      <div class="hl" id="hl" hidden></div>
+
+      <div class="progress-wrap" id="prog" hidden>
+        <div class="pg-head"><span id="pg-msg">准备中…</span><b id="pg-pct">0%</b></div>
+        <div class="bar"><i id="bar"></i></div>
+      </div>
+
+      <div class="panel panel-flat">
+        <div class="ph">
+          <b>能买的股票</b>
+          <span class="muted" id="res-meta">尚未运行</span>
+          <span class="spacer"></span>
+          <button class="btn sm ghost" id="btn-detail-more" title="看这一次为什么只选出来这些：五关各筛掉多少、平均数字、口径">全部数据</button>
+          <a class="ph-link" data-go="backtest" href="?v=backtest" title="拿过去的数据把同一套买卖规则跑一遍，看历史上赚没赚过">成绩怎么样<em id="ph-bt-badge">策略检验</em></a>
+        </div>
+        <div class="tablewrap">
+          <table class="grid" id="tbl-screen">
+            <thead>
+              <tr>
+                <th class="c-rank">#</th>
+                <th class="sortable" data-s="code">代码</th>
+                <th class="sortable" data-s="name">名称</th>
+                <th class="num sortable" data-s="price">现价</th>
+                <th class="num sortable" data-s="chg_pct">涨跌</th>
+                <th class="num sortable" data-s="score">把握度</th>
+                <th class="sortable" data-s="streak">连续站上平均成本</th>
+                <th class="num sortable" data-s="avg_surplus">高出成本</th>
+                <th class="num sortable" data-s="profit_ratio">上方套牢盘</th>
+                <th class="num sortable" data-s="pos">价格位置</th>
+                <th class="num" title="收盘跌破这个价就认错走人">跌破就走</th>
+                <th class="num" title="衡量这单值不值得做，不是让你一定等到这个价">参考目标</th>
+                <th class="c-act"></th>
+              </tr>
+            </thead>
+            <tbody id="tb-screen"><tr class="empty"><td colspan="13">软件正在选股，稍等几秒…（等不及可以点上面的「立即选股」）</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ---------- 盯盘 ---------- -->
+    <section class="view" id="view-watch">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <label class="inl">看多少只
+          <select id="scan-limit">
+            <option value="40">40 只</option>
+            <option value="80" selected>80 只</option>
+            <option value="160">160 只</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-scan"><i data-ic="play"></i>马上看一眼</button>
+        <span class="spacer"></span>
+        <span class="muted">只看「今天有没有资金在托着价」，不管上方套牢盘和价格位置 —— 适合盘中有空随手扫一眼</span>
+      </div>
+      <div class="progress-wrap" id="scan-prog" hidden>
+        <div class="pg-head"><span id="scan-msg">准备中…</span><b id="scan-pct">0%</b></div>
+        <div class="bar"><i id="scan-bar"></i></div>
+      </div>
+      <!-- 自选股：加进来之后软件自己盯着，买点卖点会在右上角弹出来 -->
+      <div class="panel" id="wpanel">
+        <div class="ph">
+          <b>我的自选股</b>
+          <span class="muted" id="w-meta">加进来之后，软件每 3 分钟看一次买点卖点</span>
+          <span class="spacer"></span>
+          <input class="search" id="w-code" placeholder="代码，如 600519" style="width:150px" />
+          <button class="btn sm" id="w-add"><i data-ic="plus"></i>加进自选</button>
+          <button class="btn sm ghost" id="w-check" title="立刻重新看一遍，不用等 3 分钟">马上检查</button>
+          <button class="btn sm ghost" id="w-sound" title="买点卖点弹出来的时候响不响">🔔 声音开</button>
+          <button class="btn sm ghost" id="w-clear" title="把右上角还没关的提醒都清掉">清掉提醒</button>
+        </div>
+        <div class="wl" id="w-list"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><b>这些人气股今天的表现</b><span class="spacer"></span><span class="muted" id="scan-meta"></span></div>
+        <div class="tablewrap">
+          <table class="grid" id="tbl-scan">
+            <thead><tr>
+              <th>代码</th><th>名称</th><th class="num">现价</th><th class="num">涨跌</th>
+              <th>今天站上平均成本</th><th class="num">今天高出平均成本</th><th class="num">三天平均高出</th>
+              <th class="num">上方套牢盘</th><th class="num">价格位置</th><th>五项</th><th class="c-act"></th>
+            </tr></thead>
+            <tbody id="tb-scan"><tr class="empty"><td colspan="11">点「马上看一眼」</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ---------- 记忆：每天的名单 + 后来涨没涨 ---------- -->
+    <section class="view" id="view-memory">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <label class="inl">看哪一天
+          <select id="mem-date"><option value="">—</option></select>
+        </label>
+        <label class="inl">看谁
+          <select id="mem-src">
+            <option value="all" selected>能买的 + 值得盯着的</option>
+            <option value="hit">只看「能买」的</option>
+            <option value="watch">只看「值得盯着」的</option>
+          </select>
+        </label>
+        <button class="btn ghost" id="btn-mem-refresh"><i data-ic="reset"></i>重新算一遍</button>
+        <span class="spacer"></span>
+        <span class="chip">每次选完自动记一笔，这里回头看它后来涨没涨</span>
+      </div>
+
+      <div class="kpis" id="mem-kpis"></div>
+
+      <!-- 算涨跌幅要一只一只取日线，第一次会慢一两秒；这中间不能是一片空的 -->
+      <div class="empty-state" id="mem-loading" hidden>
+        <b><span class="spin"></span> 正在算这几天涨了多少…</b>
+        <span>按日线收盘价一只一只算，头一次会慢一两秒，算完就存在本地，下次快。</span>
+      </div>
+
+      <div class="empty-state" id="mem-empty" hidden>
+        <b>还没有能回看的记录</b>
+        <span id="mem-empty-txt">从今天起，每次选股（自动的、手动的都算）都会在本地记一笔：那天选了谁、选的时候多少钱、给它定的止损止盈。<br>过几天回到这一页，就能看到「那天选的这批，到今天赚了还是亏了」—— 这是验证这套选股到底准不准的唯一办法。</span>
+      </div>
+
+      <div class="row2" id="mem-row2" hidden>
+        <div class="panel">
+          <div class="ph"><b>那一天之后，这些票怎么走的</b><span class="muted" id="mem-meta"></span></div>
+          <canvas id="mem-chart" class="cv" height="220"></canvas>
+        </div>
+        <div class="panel">
+          <div class="ph"><b>这一批的成绩</b></div>
+          <div id="mem-why" class="reason-box"></div>
+        </div>
+      </div>
+
+      <div class="panel" id="mem-table" hidden>
+        <div class="ph"><b>一只一只看</b><span class="muted" id="mem-sub"></span></div>
+        <div class="tablewrap" style="max-height:440px">
+          <table class="grid">
+            <thead><tr>
+              <th>代码</th><th>名称</th><th>哪一批</th><th class="num">选的时候</th>
+              <th class="num">现价</th><th class="num">涨了%</th><th class="num">最高到过</th>
+              <th class="num">最低到过</th><th class="num">几个交易日</th><th>止损止盈</th>
+            </tr></thead>
+            <tbody id="tb-mem"><tr class="empty"><td colspan="10">选一天看看</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="mem-days" hidden>
+        <div class="ph"><b>每天的成绩单</b><span class="muted">一天一行，看这套规则稳不稳定</span></div>
+        <div class="tablewrap" style="max-height:340px">
+          <table class="grid">
+            <thead><tr>
+              <th>日期</th><th class="num">记了几只</th><th class="num">其中「能买」</th>
+              <th class="num">到今天平均涨了%</th><th class="num">赚钱的比例</th><th class="num">过了几天</th>
+            </tr></thead>
+            <tbody id="tb-memdays"><tr class="empty"><td colspan="6">—</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ---------- 策略检验 ---------- -->
+    <section class="view" id="view-backtest">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <label class="inl">检验多少只
+          <select id="bt-limit">
+            <option value="20">20 只（快）</option>
+            <option value="40" selected>40 只</option>
+            <option value="80">80 只</option>
+          </select>
+        </label>
+        <label class="inl">看多久          <select id="bt-lookback">
+            <option value="120">近半年</option>
+            <option value="250" selected>近一年</option>
+            <option value="300">近一年半</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-bt"><i data-ic="play"></i>开始检验</button>
+        <span class="spacer"></span>
+        <span class="chip warn">用历史数据回头验证：按同样的规则买卖，过去赚没赚过</span>
+      </div>
+      <div class="progress-wrap" id="bt-prog" hidden>
+        <div class="pg-head"><span id="bt-msg">准备中…</span><b id="bt-pct">0%</b></div>
+        <div class="bar"><i id="bt-bar"></i></div>
+      </div>
+      <div class="kpis" id="bt-kpis"></div>
+      <div class="empty-state" id="bt-empty">
+        <b>还没检验过</b>
+        <span>「开始检验」会拿过去一年的行情，按同一套买卖规则一笔一笔回放，告诉你这套规则过去赚不赚得到钱。<br>先选「检验多少只」和「看多久」，再点左上角的按钮。</span>
+      </div>
+      <div class="row2">
+        <div class="panel">
+          <div class="ph"><b>累计收益走势</b><span class="muted">一笔一笔累加的收益率 %</span></div>
+          <canvas id="eq-chart" class="cv" height="220"></canvas>
+        </div>
+        <div class="panel">
+          <div class="ph"><b>为什么卖出的</b></div>
+          <div id="reason-box" class="reason-box"></div>
+        </div>
+      </div>
+      <div class="panel" id="bt-table">
+        <div class="ph"><b>一笔一笔看</b><span class="muted" id="bt-meta"></span></div>
+        <div class="tablewrap" style="max-height:420px">
+          <table class="grid">
+            <thead><tr><th>发现信号</th><th>买入</th><th class="num">买价</th><th>卖出</th>
+              <th class="num">卖价</th><th class="num">持有天数</th><th class="num">赚了%</th>
+              <th>为什么卖</th><th class="num">当时套牢盘%</th><th class="num">当时价格位置%</th></tr></thead>
+            <tbody id="tb-bt"><tr class="empty"><td colspan="10">点「开始检验」</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ---------- 模拟账户 ---------- -->
+    <section class="view" id="view-portfolio">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <label class="inl">检验多少只
+          <select id="pf-limit">
+            <option value="20">20 只（快）</option>
+            <option value="40" selected>40 只</option>
+            <option value="80">80 只</option>
+          </select>
+        </label>
+        <label class="inl">看多久          <select id="pf-lookback">
+            <option value="120">近半年</option>
+            <option value="250" selected>近一年</option>
+            <option value="300">近一年半</option>
+          </select>
+        </label>
+        <label class="inl">假如有          <select id="pf-cash">
+            <option value="100000">10 万本金</option>
+            <option value="300000">30 万本金</option>
+            <option value="1000000" selected>100 万本金</option>
+            <option value="3000000">300 万本金</option>
+          </select>
+        </label>
+        <label class="inl">最多同时买
+          <select id="pf-maxpos">
+            <option value="1">1 只</option>
+            <option value="3">3 只</option>
+            <option value="5" selected>5 只</option>
+            <option value="10">10 只</option>
+          </select>
+        </label>
+        <label class="inl">每只最多用
+          <select id="pf-pospct">
+            <option value="0.2" selected>20% 的钱</option>
+            <option value="0.33">33% 的钱</option>
+            <option value="0.5">50% 的钱</option>
+            <option value="1">全部</option>
+          </select>
+        </label>
+        <label class="inl">手续费吃亏          <select id="pf-slip">
+            <option value="0">不亏</option>
+            <option value="0.0005">0.05%</option>
+            <option value="0.001" selected>0.1%</option>
+            <option value="0.002">0.2%</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-pf"><i data-ic="play"></i>模拟一遍</button>
+        <span class="spacer"></span>
+        <span class="chip warn">真金白银地算：钱只有一份，买满了后面信号就买不进</span>
+      </div>
+      <div class="progress-wrap" id="pf-prog" hidden>
+        <div class="pg-head"><span id="pf-msg">准备中…</span><b id="pf-pct">0%</b></div>
+        <div class="bar"><i id="pf-bar"></i></div>
+      </div>
+      <div class="kpis" id="pf-kpis"></div>
+      <div class="empty-state" id="pf-empty">
+        <b>还没模拟过</b>
+        <span>「模拟一遍」会假装给你一笔本金，按同一套买卖规则真金白银地买、卖，算手续费和滑点，看看一年下来账户剩多少。<br>它比策略检验更接近真实情况：钱只有一份，买满了后面的信号就买不进去。</span>
+      </div>
+      <div class="row2">
+        <div class="panel">
+          <div class="ph"><b>账户余额怎么走的</b><span class="muted">现金 + 持仓市值，扣掉手续费和滑点</span></div>
+          <canvas id="pf-chart" class="cv" height="220"></canvas>
+        </div>
+        <div class="panel">
+          <div class="ph"><b>钱花在哪了</b></div>
+          <div id="pf-cost" class="reason-box"></div>
+        </div>
+      </div>
+      <div class="panel" id="pf-table">
+        <div class="ph"><b>一买一卖都记下来</b><span class="muted" id="pf-meta"></span></div>
+        <div class="tablewrap" style="max-height:420px">
+          <table class="grid">
+            <thead><tr><th>代码</th><th>名称</th><th>买入</th><th>卖出</th>
+              <th class="num">股数</th><th class="num">买入花了</th><th class="num">卖出到手</th>
+              <th class="num">手续费</th><th class="num">净赚</th><th class="num">赚了%</th>
+              <th>为什么卖</th></tr></thead>
+            <tbody id="tb-pf"><tr class="empty"><td colspan="11">点「模拟一遍」</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ---------- 使用说明 ---------- -->
+    <section class="view" id="view-method">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <span class="muted">都是一句话能讲清的规则，挑着看就行</span>
+        <span class="spacer"></span>
+        <a class="btn ghost sm" data-go="backtest" href="?v=backtest">看看历史成绩<em>策略检验</em></a>
+        <a class="btn ghost sm" data-go="settings" href="?v=settings">改门槛<em>参数设置</em></a>
+      </div>
+      <div class="meth-grid">
+
+        <div class="panel">
+          <div class="ph"><b>软件挑股的五个条件</b><span class="muted">全满足才算「能买」</span></div>
+          <div class="meth-body">
+            <div class="step">
+              <b class="step-n">①</b>
+              <div>
+                <h5>连涨三天，价格一直站在「平均成本」上方 <span class="tag-hot">最难过的一关</span></h5>
+                <p>分时图上的那条黄线，含义是<b>今天所有买的人的平均买入价</b>。价格一直在黄线上方，说明今天进场的人全都在赚钱，而且还有人愿意出更高的价接货 —— 这是有钱在往里进的直接证据。</p>
+                <p>软件看的是<b>下午 14:30 那一刻</b>：那时价格在黄线上方，就说明你此刻下单买，也是在赚钱的人那一队里。为什么不用收盘价？因为你要在 14:30 就下单，那时的黄线还没定型，用收盘价判断等于提前知道了答案。</p>
+                <p class="eq">高出平均成本多少 = 价格 ÷ 黄线 − 1，越正越好</p>
+                <p class="muted" style="font-size:12px;margin-top:4px">全市场实测：按收盘价算能站上的股票，八成在 14:30 那一刻还站不上。所以这道关不能放松。</p>
+              </div>
+            </div>
+            <div class="step">
+              <b class="step-n">②</b>
+              <div>
+                <h5>上面没有一堆套牢的人在等着解套</h5>
+                <p>软件会模拟一遍：这只股票在每个价位上还压着多少筹码。如果现价上方压着很多筹码，股价一涨上去这些人就急着卖回本，涨不动。</p>
+                <p>所以只挑<b>上方空荡荡</b>的——上面没什么人，涨起来才没有阻力。</p>
+                <p class="eq">套牢盘≤ 25%：压在现价上方、等着解套的筹码不超过四分之一</p>
+              </div>
+            </div>
+            <div class="step">
+              <b class="step-n">③</b>
+              <div>
+                <h5>价格在低位，不是已经涨上去的半山腰</h5>
+                <p>同样的筹码结构，在山顶和在山脚是两回事。软件把最近 120 天的最高价和最低价拉一条线，看现在处在什么位置。</p>
+                <p class="eq">价格位置 ≤ 30%：现在在最近 120 天区间的下方三成以内</p>
+                <p class="muted" style="font-size:12px;margin-top:4px">低位的意义是<b>跌无可跌</b>：往下空间小，往上空间大。但它不代表不会继续跌——所以后面还有一条止损线兜着。</p>
+              </div>
+            </div>
+            <div class="step">
+              <b class="step-n">④</b>
+              <div>
+                <h5>在底部横着，没有一路往下掉</h5>
+                <p>只做「跌不动了、开始横盘」的股票，不做「刚从高处一路砸下来」的下跌中途。</p>
+                <p>判断方法很简单：最近 20 天波动不大（最高价 ÷ 最低价 − 1 不超过 40%），而且这 20 天的收盘价没有单边往下掉（回归斜率不超过 12%）。</p>
+                <p class="muted" style="font-size:12px;margin-top:4px">「横着走」= 有人在同一个价位反复接货，卖的人已经卖得差不多了。这条可以在「参数设置」里关掉。</p>
+              </div>
+            </div>
+            <div class="step">
+              <b class="step-n">⑤</b>
+              <div>
+                <h5>还在 20 日均线上 <span class="tag-hot" style="color:var(--txt-3);border-color:var(--line-2)">可关</span></h5>
+                <p>最后一道保险：日线的 20 日均线没被跌破，说明大方向没坏，不是在一个长期下跌趋势里抢反弹。</p>
+                <p class="muted" style="font-size:12px;margin-top:4px">这条默认<b>不开</b>（参数设置里「要求站在 20 日均线上」）。想要更严格就打开，代价是能买的股票会少很多。</p>
+              </div>
+            </div>
+            <div class="step">
+              <b class="step-n">★</b>
+              <div>
+                <h5>自动帮你看着，到点提醒 <span class="tag-hot" style="color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent)">不用手动点</span></h5>
+                <p>打开软件它就开始干活，你不用管：</p>
+                <ul>
+                  <li><b>开盘后</b>自动扫一遍，把候选都找出来</li>
+                  <li><b>盘中每 5 分钟</b>自动重新扫一次（不费你的事）</li>
+                  <li><b>14:00 之后</b>先按当前价格试算一遍，把最可能在 14:30 达标的挑出来盯着</li>
+                  <li><b>14:50</b> 最后扫一次，这时名单就是可以直接下单的</li>
+                </ul>
+                <p class="muted" style="font-size:12px;margin-top:4px">周六日、法定假日自动休息。就算白天没开软件，14:50 之后打开也会立刻补一次最终名单；上次的名单存在本地，重开软件不用重新等。想改这几个时间点，到「参数设置→ 自动选股」里改。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="ph"><b>什么时候买、什么时候卖</b><span class="muted">软件已经定好，可在「参数设置」改</span></div>
+          <div class="meth-body">
+            <div class="step buy">
+              <b class="step-n b">B</b>
+              <div>
+                <h5>买：看到名单当天下午就买</h5>
+                <p>14:30 确认条件还成立，就在<b>当天尾盘 14:45 前后买进去</b>，不要拖到第二天。</p>
+                <p class="eq">为什么不等第二天？一是晚上出利空会跳空低开，二是第二天开盘往往直接高开，你要么追高要么买不到</p>
+                <p class="muted" style="font-size:12px">两种买法对比过（40 只 × 近一年）：当天尾盘买胜率 44.4%、累计多赚 73.9%；等第二天开盘买胜率 46.8%、累计只多赚 46.0%。尾盘买赚得多，虽然赢的次数少一些。</p>
+              </div>
+            </div>
+            <div class="step sell">
+              <b class="step-n s">S</b>
+              <div>
+                <h5>卖：三层保护，任何一层触发就走</h5>
+                <ul>
+                  <li><b>亏了就走</b>：收盘跌破止损价就走（每只都不一样，名单上直接写着；大约比现价低 2.5%~6%）</li>
+                  <li><b>连续两天掉到平均成本下面</b>：说明当天的买盘已经不赚钱了，判断失效，走人（只看一天容易被日内噪声吓出来）</li>
+                  <li><b>赚了以后</b>：赚到 +5% 就开始盯着，从持仓最高点回落 7% 就清仓（你也可以在参数里改成"到目标价 +15% 直接卖"）</li>
+                  <li><b>拖太久也走</b>：最多拿 10 个交易日，到期没动静就换下一只</li>
+                </ul>
+              </div>
+            </div>
+            <div class="step">
+              <b class="step-n">钱</b>
+              <div>
+                <h5>买多少</h5>
+                <p>把握度越高买越多：80 分以上用 20% 的钱、70 分以上 15%、60 分以上 10%、其余 5%。单只股票最多用总资金的两成。</p>
+                <p class="muted" style="font-size:12px;margin-top:4px">这套规则我用真实账户模拟验证过：钱只有一份，买满了后面的信号就买不进去。所以别一次梭哈，分批更好。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel fold" id="fold-data">
+          <div class="ph" data-fold>
+            <b>数据从哪来</b><span class="muted">这部分偏技术，不看也能用</span>
+            <span class="spacer"></span>
+            <span class="fold-hint">展开看看</span><i class="fold-caret" data-ic="chevron"></i>
+          </div>
+          <div class="fold-body">
+          <div class="meth-body">
+            <table class="htbl">
+              <tbody>
+                <tr><td class="k">行情</td><td>新浪财经（实时报价 / 5 分钟线 / 日线），日线不复权</td></tr>
+                <tr><td class="k">平均成本线</td><td>由 5 分钟线逐日累加算出来，就是行情软件里那条黄色均价线（今累计成交额 ÷ 累计成交量）</td></tr>
+                <tr><td class="k">套牢盘怎么算</td><td>用每天的换手率往前推：换手多的一天就把老筹码冲掉得多，换手少的股票筹码记得久（算法参考开源项目 adata）</td></tr>
+                <tr><td class="k">节假日</td><td>软件自带 2022-2026 年交易日历，离线就能判断今天开不开市</td></tr>
+                <tr><td class="k">缓存</td><td>日线 6 小时、盘中 5 分钟更新一次，所以再扫会快很多</td></tr>
+                <tr><td class="k">界面</td><td>右上角可切换亮色 / 暗色，你自己选的那个会被记住</td></tr>
+              </tbody>
+            </table>
+            <div class="hintline" style="margin-top:10px">本软件只做数据统计和规则筛选，不构成任何投资建议。过去的成绩不代表以后也能赚。</div>
+          </div>
+          </div><!-- /fold-body -->
+        </div>
+
+      </div>
+      </div>
+    </section>
+
+    <!-- ---------- 设置 ---------- -->
+    <section class="view" id="view-settings">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <button class="btn primary" id="btn-save"><i data-ic="save"></i>保存</button>
+        <button class="btn ghost" id="btn-reset"><i data-ic="reset"></i>恢复默认</button>
+        <span class="spacer"></span>
+        <span class="muted">不确定就保持默认，默认值是调过的</span>
+        <button class="btn ghost" id="btn-clear"><i data-ic="trash"></i>清空缓存</button>
+      </div>
+      <div class="set-grid" id="set-grid"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ 详情抽屉 ============ -->
+<div class="drawer-mask" id="mask"></div>
+<aside class="drawer" id="drawer">
+  <div class="dw-head">
+    <div>
+      <div class="dw-title"><span id="dw-name">—</span><em id="dw-code">—</em></div>
+      <div class="dw-sub"><b id="dw-price">—</b><span id="dw-chg"></span><span class="muted" id="dw-date"></span></div>
+    </div>
+    <button class="icon-btn" id="dw-close"><i data-ic="x"></i></button>
+  </div>
+  <div class="dw-body" id="dw-body"></div>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<!-- ============ 买点卖点提醒：右上角弹出来的小卡片，带提示音 ============ -->
+<div class="alerts" id="alerts" aria-live="polite"></div>
+
+<!-- ============ 这次选股的细节弹窗（五关、汇总数字、值得盯着的） ============ -->
+<div class="modal-mask" id="wm-mask"></div>
+<div class="modal" id="watch-modal" role="dialog" aria-modal="true" aria-labelledby="wm-title" hidden>
+  <div class="mh">
+    <div class="mh-main">
+      <b id="wm-title">这次选股的细节</b>
+      <span class="muted" id="wm-sub"></span>
+    </div>
+    <div class="mh-tools">
+      <div class="seg" id="wm-tabs">
+        <button data-wt="gates" class="on">五关各筛掉多少</button>
+        <button data-wt="stats">汇总数字</button>
+        <button data-wt="watch">值得盯着</button>
+      </div>
+      <div class="seg" id="wm-filter" hidden>
+        <button data-wf="all" class="on">全部</button>
+        <button data-wf="near">只差一项</button>
+      </div>
+      <button class="icon-btn" id="wm-close" title="关掉（Esc）"><i data-ic="x"></i></button>
+    </div>
+  </div>
+  <div class="mb">
+    <div class="wt-pane" id="wt-gates"><div class="funnel-bar" id="funnel"></div></div>
+    <div class="wt-pane" id="wt-stats" hidden><div class="kpis" id="kpis"></div><div class="pick-line" id="pick-line" hidden></div></div>
+    <div class="wt-pane" id="wt-watch" hidden><div class="wlist wl-full" id="wm-list"></div></div>
+  </div>
+  <div class="mf"><span class="muted" id="wm-foot"></span><span class="spacer"></span><span class="muted">点任意一只看详情 · Esc 关掉</span></div>
+</div>
+<script src="_demo.js?v=1.8.2"></script>
+<script src="app.js?v=1.8.2"></script>
+</body>
+</html>

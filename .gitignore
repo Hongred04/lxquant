@@ -1,0 +1,40 @@
+# ============ 不进的：能再生成的 & 本机私有的 ============
+
+# 自带的 Python 运行时（100MB，换机器重新放一份就行）
+runtime/
+
+# 行情缓存（一天一个文件，累计 500MB 以上，删了会自动重新下）
+data/cache/
+
+# 导出的 csv / json（每次点「导出」都会再生成一个）
+data/export/
+
+# 上次选股结果（每次跑完都覆盖，属于运行态）
+data/last_screen.json
+
+# 自选股名单（本机私有）
+data/watchlist.json
+
+# 选股记忆（本机积累的回看记录，换机器重新开始攒）
+data/memory/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 编辑器和系统文件
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 修 index.html 编码事故时留下的中间产物
+web/_backup/
+
+# 运行时日志
+*.log
+_srv.err
+_server_log.txt
