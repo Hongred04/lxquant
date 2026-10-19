@@ -146,21 +146,32 @@ def _hhmm_int(s, default: int = 0) -> int:
 
 
 def consecutive_above(avx: pd.DataFrame, days: int = 3, ratio: float = 1.0,
-                      tol: float = 0) -> dict:
+                      tol: float = 0, mode: str = "streak",
+                      min_ratio: float = 0.7) -> dict:
     """
-    判断最近 days 个交易日是否"收盘价 > 当日分时均价线"。
+    平均成本线（分时均价线）这一关。
+
+    mode="streak"（老口径）：最近 days 天"连续"收盘价 > 当日分时均价线，允许 tol 天例外。
+       命中率极低（实测连续 3 天只有 ~1% 的票过），是个漏勺。
+    mode="ratio" （现在的默认）：最近 days 天里，达标天数占比 >= min_ratio 即算过。
+       窗口最后一两天还必须是达标的（最近表现不能坏），
+       否则"过去 20 天站上 14 天、但今天砸在均价线下方"的票也会混进来。
+       这样既保留了"资金持续站上平均成本"的本来含义，又把 7% 左右的误差率
+       摊平到一个 20 天的窗口里，而不是被一两天的噪声一票否决。
     ratio: 收盘/均价 需要 >= ratio
-    tol  : 允许其中 tol 天不达标（容忍度）
-    返回最近 days 日的明细 + 是否达标 + 当前连续天数。
+    返回明细 + 是否达标（另带 streaks 口径的连续天数，仅供展示）。
     """
     null = {"ok": False, "days": 0, "need": days, "detail": [], "streak": 0,
-            "avg_surplus": 0.0, "last_date": None}
+            "avg_surplus": 0.0, "last_date": None, "fails": 0,
+            "hit": 0, "have": 0, "need_hit": 0, "mode": mode}
     if avx is None or avx.empty:
         return null
     a = avx.tail(max(days, 10)).reset_index(drop=True)
     flag = (a["close"] / a["avg_price"]) >= ratio
+    have = min(len(a), days)
+    # 明细多的那几天（20 天）不往前端全塞，只给最近 8 天够看
     detail = []
-    for name, r in a.tail(days).iterrows():
+    for name, r in a.tail(min(days, 8)).iterrows():
         try:
             ok = bool(flag.loc[name])
         except KeyError:
@@ -171,10 +182,16 @@ def consecutive_above(avx: pd.DataFrame, days: int = 3, ratio: float = 1.0,
             "surplus": round(float(r["surplus"]) * 100, 3),
             "ok": ok,
         })
-    have = min(len(a), days)
     window = flag.tail(have)
+    hit = int(window.sum())
     fail = int((~window).sum())
-    ok = have >= days and fail <= tol
+    need_hit = int(np.ceil(min_ratio * days - 1e-9))
+    if mode == "ratio":
+        # 最近两天至少要有一天站得上（今天或昨天），否则"历史好、现在弱"的票也算过
+        recent_all = [bool(x) for x in window.tail(min(2, have))]
+        ok = bool(have >= days and hit >= need_hit and any(recent_all))
+    else:
+        ok = bool(have >= days and fail <= tol)
     # 当前连续站上均价线的天数
     streak, i = 0, len(flag) - 1
     while i >= 0 and bool(flag.iloc[i]):
@@ -184,11 +201,30 @@ def consecutive_above(avx: pd.DataFrame, days: int = 3, ratio: float = 1.0,
     win_avx = a.tail(have)
     surplus_pct = float((win_avx["close"] / win_avx["avg_price"] - 1.0).mean() * 100)
     return {
-        "ok": bool(ok), "days": have, "need": days, "detail": detail,
+        "ok": ok, "days": have, "need": days, "detail": detail,
         "streak": streak, "avg_surplus": round(surplus_pct, 3),
         "last_date": str(a["date"].iloc[-1]),
-        "fails": fail,
+        "fails": fail, "hit": hit, "have": have, "need_hit": need_hit, "mode": mode,
     }
+
+
+def avg_gate(avx: pd.DataFrame, window: int = 20, min_ratio: float = 0.7,
+             ratio: float = 1.0, last_day: bool = True) -> dict:
+    """
+    全市场扫描用的"平均成本线"关口：近 window 天里达标比例 >= min_ratio。
+
+    口径与买卖决策一致：用"收盘价 vs 全天分时均价线"（tail_from="close"），
+    因为下单是在收盘前判断的，回测也按收盘价成交，不能夹带未来数据。
+
+    last_day=True（默认）：窗口最后一天（=今天/最新交易日）必须站上。
+      这条是"今天资金还在流入"的闸门。收盘前用 preview_at 试算时，
+      今天还没定型，自动跳过（由 tail_preview 负责当天那一段）。
+    """
+    r = consecutive_above(avx, int(window or 20), ratio, 0,
+                          mode="ratio", min_ratio=min_ratio)
+    if last_day and r.get("detail"):
+        r["ok"] = bool(r["ok"] and r["detail"][-1]["ok"])
+    return r
 
 
 def tail_window_stats(avx: pd.DataFrame, days: int = 3,

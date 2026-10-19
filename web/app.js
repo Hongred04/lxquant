@@ -1146,8 +1146,6 @@ function bindWatchlistPanel() {
     if (del) { removeWatch(del.dataset.wdel); return; }
     const det = e.target.closest('[data-detail]');
     if (det) { openDetail(det.dataset.detail); return; }
-    const row = e.target.closest('.wrow');
-    if (row && !e.target.closest('button') && row.dataset.code) openDetail(row.dataset.code);
   });
   const inp = $('#w-code');
   if (inp) {
@@ -1491,6 +1489,7 @@ async function runBacktest() {
 function renderBtEmpty() {
   const has = !!(S.bt && S.bt.summary);
   const box = $('#bt-empty'); if (box) box.hidden = has;
+  const more = $('#bt-more'); if (more) more.hidden = !has;   // 没跑过就别摆「在整屏里看」
   ['#bt-kpis', '#view-backtest .row2', '#bt-table'].forEach(sel => {
     const el = document.querySelector(sel);
     if (el) el.hidden = !has;
@@ -1501,6 +1500,7 @@ function renderBtEmpty() {
 function renderPfEmpty() {
   const has = !!(S.pf && S.pf.summary);
   const box = $('#pf-empty'); if (box) box.hidden = has;
+  const more = $('#pf-more'); if (more) more.hidden = !has;   // 没模拟过就别摆「在整屏里看」
   ['#pf-kpis', '#view-portfolio .row2', '#pf-table'].forEach(sel => {
     const el = document.querySelector(sel);
     if (el) el.hidden = !has;
@@ -2006,6 +2006,217 @@ function drawKline(cv, a, tab) {
   g.textAlign = 'right'; g.fillText(d[d.length - 1].date, pad.l + w, H - 5);
 }
 
+/* ================================================================ 二级弹窗
+   主页面上那些被挤窄的东西（自选股、全市场、记忆明细、检验/账户的细表、几组参数），
+   在原来位置只留一句摘要 + 一个「⤢」；点「⤢」把整块摊到一屏里看 / 改。
+   表格类不搬 DOM（表头排序、"点哪只"那些函数都是按 id 取的），而是现场再渲染一份，
+   只在窄地方留摘要 —— 所以两边永远一致，也不会有重复 id。设置类相反：弹窗里改的是
+   一份草稿，点保存才写回 #set-grid 再走原来的 POST。 */
+const PANES = {
+  watch: {
+    t: '自选股', s: '按名字加，买点卖点自己弹。这里按整屏宽摆卡片',
+    build: () => { paintWatchList($('#pm-body'), S.watchList || [], false); },
+  },
+  scan: {
+    t: '全市场谁在托价', s: '人气股今天的变化，按整屏宽看列宽给足',
+    build: () => {
+      const box = $('#pm-body');
+      box.innerHTML = '<div class="tablewrap pm-tw"><table class="grid" id="tbl-scan-pm"></table></div>';
+      const src = $('#tbl-scan'), tgt = $('#tbl-scan-pm');
+      if (!src) return;
+      tgt.innerHTML = src.innerHTML;
+      $$('#tbl-scan-pm tbody tr').forEach((tr, i) => tr.dataset.pmRow = i);   // 点行开着明细，和主页一致
+      $('#pm-foot').textContent = `共 ${$$('#tbl-scan-pm tbody tr').length} 行 · 想看某只的明细就点那一行`;
+    },
+  },
+  memday: {
+    t: '那天之后的走势', s: '选了哪些、后来怎么走的，全屏看',
+    build: () => {
+      const box = $('#pm-body');
+      const cv = $('#mem-chart'), tbl = $('#mem-table');
+      if (!cv || !tbl || tbl.hidden) { box.innerHTML = '<div class="empty-state"><b>还没选到一天</b><span>先在「记忆」里点一天，再从这里打开</span></div>'; return; }
+      box.innerHTML = `<div class="pm-panel">${cv.parentNode.querySelector('.ph').outerHTML}<canvas id="pm-mem-chart" class="cv" height="300"></canvas></div>
+        <div class="pm-panel"><div class="ph"><b>一只一只看</b><span class="muted">${esc($('#mem-sub').textContent)}</span></div>
+        <div class="tablewrap pm-tw">${tbl.querySelector('table').outerHTML}</div></div>`;
+      $('#pm-sub').textContent = $('#mem-meta').textContent || '';
+      drawChartTo('#pm-mem-chart', $('#mem-chart'));
+    },
+  },
+  memdays: {
+    t: '每天的成绩单', s: '一天一行，看这套规则稳不稳定',
+    build: () => {
+      const tbl = $('#mem-days');
+      if (!tbl || tbl.hidden) { $('#pm-body').innerHTML = '<div class="empty-state"><b>还没有成绩单</b><span>选过几天之后这里会一天一行</span></div>'; return; }
+      $('#pm-body').innerHTML = `<div class="tablewrap pm-tw">${tbl.querySelector('table').outerHTML}</div>`;
+    },
+  },
+  bt: {
+    t: '策略检验 · 全部结果', s: '拿过去一年的行情把买卖规则跑一遍，这里是全部数字',
+    build: () => {
+      const box = $('#pm-body');
+      if (!S.btResult && (!$('#bt-empty') || !$('#bt-empty').hidden)) {
+        box.innerHTML = '<div class="empty-state"><b>还没检验过</b><span>先在本页点「开始检验」，跑完再回来看</span></div>'; return;
+      }
+      const r2 = $('#bt-row2'), tbl = $('#bt-table');
+      box.innerHTML = `<div class="pm-panel"><div class="ph"><b>一、最重要的几个数</b></div>${$('#bt-kpis').innerHTML}</div>
+        <div class="pm-row2">
+          <div class="pm-panel"><div class="ph"><b>累计收益走势</b><span class="muted">一笔一笔累加的收益率 %</span></div><canvas id="pm-eq" class="cv" height="280"></canvas></div>
+          <div class="pm-panel"><div class="ph"><b>为什么卖出的</b></div>${$('#reason-box').innerHTML}</div>
+        </div>
+        <div class="pm-panel"><div class="ph"><b>二、一笔一笔看</b><span class="muted">${esc(($('#bt-meta') || {}).textContent || '')}</span></div>
+          <div class="tablewrap pm-tw">${tbl.querySelector('table').outerHTML}</div></div>`;
+      if (r2 && r2.hidden) box.querySelector('.pm-row2').style.opacity = .5;
+      drawChartTo('#pm-eq', $('#eq-chart'));
+    },
+  },
+  pf: {
+    t: '模拟账户 · 全部明细', s: '钱只有一份，买满了就买不进，还要扣手续费和滑点',
+    build: () => {
+      const box = $('#pm-body'), tbl = $('#pf-table');
+      if (!S.pf) {   // 还没模拟过：别把主页那几张空壳搬进来
+        box.innerHTML = '<div class="empty-state"><b>还没模拟过</b><span>先在本页点「模拟一遍」，跑完再回来看全部明细。</span></div>';
+        return;
+      }
+      box.innerHTML = `<div class="pm-panel"><div class="ph"><b>一、账户现在什么样</b></div>${$('#pf-kpis').innerHTML}</div>
+        <div class="pm-panel"><div class="ph"><b>账户余额怎么走的</b><span class="muted">现金 + 持仓市值，扣掉手续费和滑点</span></div><canvas id="pm-pf" class="cv" height="280"></canvas></div>
+        <div class="pm-panel"><div class="ph"><b>二、一买一卖都记下来</b><span class="muted">${esc(($('#pf-meta') || {}).textContent || '')}</span></div>
+          <div class="tablewrap pm-tw">${tbl.querySelector('table').outerHTML}</div></div>`;
+      drawChartTo('#pm-pf', $('#pf-chart'));
+    },
+  },
+  method: {
+    t: '使用说明', s: '按类分开看，一屏一类',
+    tabs: [['rule', '五个条件'], ['trade', '怎么买怎么卖'], ['data', '数据从哪来']],
+    build: tab => {
+      const src = $(`.meth-body[data-part="${tab}"]`);
+      $('#pm-body').innerHTML = src
+        ? `<div class="meth-body pm-meth">${src.innerHTML}</div>`
+        : '<div class="empty-state"><b>这一节正在整</b></div>';
+      if (src) { $('#pm-body').scrollTop = 0; }
+    },
+  },
+  settings: {
+    t: '参数设置', s: '一组一屏，改完点右上角保存',
+    tabs: () => SET_META.map(c => [c.id, c.title]),
+    save: true,
+    build: (tab, h) => {
+      const cat = SET_META.find(c => c.id === tab) || SET_META[0];
+      $('#pm-body').innerHTML = `<div class="pm-set">${setCardHTML(cat, h.draft, h.dirty)}${cat.note ? `<p class="sc-note">${cat.note}</p>` : ''}</div>`;
+      bindToggles($('#pm-body'));
+    },
+  },
+};
+/* canvas 不能 clone，弹窗里的图得照原图的像素重画一遍：原图和副本尺寸不一样，
+   把原图的像素按比例铺满即可（曲线类图这样够用） */
+function drawChartTo(sel, src) {
+  const dst = $(sel);
+  if (!dst || !src || !src.width) return;
+  const k = Math.min(2, window.devicePixelRatio || 1);
+  const W = dst.parentNode.clientWidth || 900, H = +dst.getAttribute('height') || 280;
+  dst.width = W * k; dst.height = H * k; dst.style.height = H + 'px'; dst.style.width = W + 'px';
+  const c = dst.getContext('2d');
+  c.setTransform(k, 0, 0, k, 0, 0);
+  c.drawImage(src, 0, 0, src.width, src.height, 0, 0, W, H);
+}
+/** 一张参数卡片（主页设置页和弹窗里共用一套渲染，免得两边样式/字段对不上） */
+function setCardHTML(cat, p, w, dirty) {
+  return `
+    <div class="set-card${dirty ? ' dirty' : ''}" data-cat="${cat.id}">
+      <h3>${cat.title}<em>${cat.tag}</em></h3>
+      ${cat.fields.map(f => {
+        const val = f.weight ? w[f.weight] : p[f.k];
+        if (f.t === 'bool') {
+          return `<div class="frow"><label>${f.n}</label>
+            <button class="toggle ${val ? 'on' : ''}" data-k="${f.k}" data-t="bool"></button></div>`;
+        }
+        if (f.t === 'select') {
+          return `<div class="frow"><label>${f.n}${f.hint ? `<small>${f.hint}</small>` : ''}</label>
+            <select data-k="${f.k}" data-t="str">${f.opts.map(o => `<option value="${o[0]}" ${o[0] == val ? 'selected' : ''}>${o[1]}</option>`).join('')}</select></div>`;
+        }
+        if (f.t === 'text') {
+          return `<div class="frow"><label>${f.n}${f.hint ? `<small>${f.hint}</small>` : ''}</label>
+            <input type="text" data-k="${f.k}" data-t="str" value="${String(val ?? '')}" /></div>`;
+        }
+        const step = f.step || (f.t === 'int' ? 1 : 0.01);
+        return `<div class="frow"><label>${f.n}${f.hint ? `<small>${f.hint}</small>` : ''}</label>
+          <input type="number" data-k="${f.k}" data-t="${f.t}" data-weight="${f.weight || ''}"
+            value="${f.t === 'pct' ? (val * 100).toFixed(2) : val}" step="${f.t === 'pct' ? step * 100 : step}"
+            ${f.min !== undefined ? `min="${f.t === 'pct' ? f.min * 100 : f.min}"` : ''}
+            ${f.max !== undefined ? `max="${f.t === 'pct' ? f.max * 100 : f.max}"` : ''} /></div>`;
+      }).join('')}
+    </div>`;
+}
+function bindToggles(root) {
+  $$('.toggle[data-k]', root || document).forEach(b => b.onclick = () => {
+    b.classList.toggle('on');
+    const box = b.closest('.mb');
+    if (box) box.dispatchEvent(new Event('pm-dirty'));   // 开关也得算"改过"
+  });
+}
+const pm = { id: null, tab: null, draft: null, dirty: false };
+/** 打开二级弹窗：id 见 PANES，tab 可选（参数分组 / 说明的小节） */
+function openPane(id, tab) {
+  const P = PANES[id];
+  if (!P) return;
+  pm.id = id;
+  const tabs = typeof P.tabs === 'function' ? P.tabs() : P.tabs;
+  pm.tab = tab || (tabs ? tabs[0][0] : null);
+  pm.dirty = false;
+  pm.draft = (id === 'settings' && S.cfg) ? { params: { ...S.cfg.params }, weights: { ...S.cfg.weights } } : null;
+  $('#pm-title').textContent = P.t;
+  $('#pm-sub').textContent = P.s || '';
+  $('#pm-save').hidden = !P.save;
+  const seg = $('#pm-tabs');
+  seg.hidden = !tabs;
+  seg.innerHTML = tabs ? tabs.map(([k, n]) => `<button data-pm-tab="${k}" class="${k === pm.tab ? 'on' : ''}">${n}</button>`).join('') : '';
+  paintPanes();
+  paintIcons($('#page-modal'));
+  // 先摘掉 hidden 再测量：.modal 带 [hidden]{display:none}，藏着量 getBoundingClientRect 恒为 0
+  $('#page-modal').hidden = false;
+  $('#pm-mask').classList.add('show');
+  fitPane();
+  $('#pm-body').scrollTop = 0;
+  setTimeout(() => ($('#pm-close') || {}).focus && $('#pm-close').focus(), 30);
+}
+/** 内容不够一屏就别留一大片空：按实际内容高度收，最多到 92vh（CSS 里是上限） */
+function fitPane() {
+  const m = $('#page-modal');
+  m.style.height = 'auto';
+  const h = Math.min(m.scrollHeight, Math.round(innerHeight * 0.92));
+  m.style.height = h + 'px';
+}
+function paintPanes() {
+  const P = PANES[pm.id];
+  if (!P) return;
+  $('#pm-body').innerHTML = '';
+  P.build(pm.tab, pm);
+  $$('#pm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.pmTab === pm.tab));
+  if ($('#page-modal') && !$('#page-modal').hidden) fitPane();   // 换页签后内容高度变了
+}
+function closePane() {
+  if (!pm.id) return;
+  const wasDirty = pm.dirty;
+  const id = pm.id;
+  pm.id = null; pm.dirty = false; pm.draft = null;
+  $('#page-modal').hidden = true;
+  $('#pm-mask').classList.remove('show');
+  // 改到一半就关：说明白，别让人以为已经存了
+  if (wasDirty && id === 'settings') toast('参数没保存，还是原来的');
+}
+/** 弹窗里点「保存」：把草稿写回主页设置页那份 DOM，再走原来的保存流程 */
+function savePane() {
+  if (pm.id !== 'settings' || !S.cfg) return;
+  const { params, weights } = collectSettings($('#pm-body'));
+  Object.assign(S.cfg.params, params);
+  Object.assign(S.cfg.weights, weights);
+  pm.dirty = false;
+  pm.id = null;
+  renderSettings();          // 主页那份跟着刷新
+  $('#page-modal').hidden = true;
+  $('#pm-mask').classList.remove('show');
+  saveSettings();
+}
+
 /* ================================================================ 设置 */
 const SET_META = [
   { id: 'auto', title: '自动选股', tag: 'AUTO', fields: [
@@ -2077,42 +2288,32 @@ const SET_META = [
   ]},
 ];
 
+/** 主页那份分组卡片：每组只显示前 4 项，剩下的进弹窗看。
+    设置项和弹窗共用 setCardHTML，字段/单位不会两边不一致 */
 function renderSettings() {
   if (!S.cfg) return;
-  const p = S.cfg.params, w = S.cfg.weights;
-  $('#set-grid').innerHTML = SET_META.map(cat => `
-    <div class="set-card">
-      <h3>${cat.title}<em>${cat.tag}</em></h3>
-      ${cat.fields.map(f => {
-        const val = f.weight ? w[f.weight] : p[f.k];
-        if (f.t === 'bool') {
-          return `<div class="frow"><label>${f.n}</label>
-            <button class="toggle ${val ? 'on' : ''}" data-k="${f.k}" data-t="bool"></button></div>`;
-        }
-        if (f.t === 'select') {
-          return `<div class="frow"><label>${f.n}${f.hint ? `<small>${f.hint}</small>` : ''}</label>
-            <select data-k="${f.k}" data-t="str">${f.opts.map(o => `<option value="${o[0]}" ${o[0] == val ? 'selected' : ''}>${o[1]}</option>`).join('')}</select></div>`;
-        }
-        if (f.t === 'text') {
-          return `<div class="frow"><label>${f.n}${f.hint ? `<small>${f.hint}</small>` : ''}</label>
-            <input type="text" data-k="${f.k}" data-t="str" value="${String(val ?? '')}" /></div>`;
-        }
-        const step = f.step || (f.t === 'int' ? 1 : 0.01);
-        return `<div class="frow"><label>${f.n}${f.hint ? `<small>${f.hint}</small>` : ''}</label>
-          <input type="number" data-k="${f.k}" data-t="${f.t}" data-weight="${f.weight || ''}"
-            value="${f.t === 'pct' ? (val * 100).toFixed(2) : val}" step="${f.t === 'pct' ? step * 100 : step}"
-            ${f.min !== undefined ? `min="${f.t === 'pct' ? f.min * 100 : f.min}"` : ''}
-            ${f.max !== undefined ? `max="${f.t === 'pct' ? f.max * 100 : f.max}"` : ''} /></div>`;
-      }).join('')}
-      ${cat.note ? `<p class="sc-note">${cat.note}</p>` : ''}
-    </div>`).join('');
-
-  $$('#set-grid .toggle').forEach(b => b.onclick = () => b.classList.toggle('on'));
+  $('#set-grid').innerHTML = SET_META.map(cat => {
+    const head = cat.fields.slice(0, 4), rest = cat.fields.length - head.length;
+    return `
+    <div class="set-card" data-cat="${cat.id}">
+      <h3>${cat.title}<em>${cat.tag}</em><button class="btn sm ghost set-open" data-open="settings" data-tab="${cat.id}">${rest > 0 ? `还有 ${rest} 项` : '开'}<em>⤢</em></button></h3>
+      ${setCardBody(cat, head, S.cfg.params, S.cfg.weights)}
+      ${rest > 0 ? `<button class="set-more" data-open="settings" data-tab="${cat.id}">这组还有 ${rest} 项 →</button>` : ''}
+    </div>`;
+  }).join('');
+  bindToggles($('#set-grid'));
+}
+/** 一张卡里那些 frow（head 为空就是全部字段） */
+function setCardBody(cat, head, p, w) {
+  const sub = { ...cat, fields: head };
+  const html = setCardHTML(sub, p, w, false);
+  // 只要卡片内部那截，外面那层 .set-card 由调用方自己带
+  return html.slice(html.indexOf('>') + 1, html.lastIndexOf('</div>'));
 }
 
-function collectSettings() {
+function collectSettings(root = $('#set-grid')) {
   const params = {}, weights = {};
-  $$('#set-grid [data-k]').forEach(el => {
+  $$('[data-k]', root).forEach(el => {
     const k = el.dataset.k, t = el.dataset.t;
     if (t === 'bool') { params[k] = el.classList.contains('on'); return; }
     if (t === 'str') { params[k] = el.value; return; }
@@ -2177,6 +2378,27 @@ async function init() {
     const box = h.closest('.fold');
     if (box) box.classList.toggle('open');
   });
+  // 二级弹窗：任何带 data-open 的按钮都把那一块摊到一屏里
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-open]');
+    if (b) { openPane(b.dataset.open, b.dataset.tab); return; }
+    if (e.target.closest('#pm-close') || e.target.id === 'pm-mask') { closePane(); return; }
+    if (e.target.closest('#pm-save')) { savePane(); return; }
+    const t = e.target.closest('[data-pm-tab]');
+    if (t) { pm.tab = t.dataset.pmTab; paintPanes(); return; }
+  });
+  $('#pm-body').addEventListener('input', e => {
+    if (pm.id !== 'settings') return;
+    pm.dirty = true;
+    const card = e.target.closest('.set-card');
+    if (card) card.classList.add('dirty');
+  });
+  $('#pm-body').addEventListener('change', e => {
+    if (pm.id === 'settings') pm.dirty = true;
+  });
+  $('#pm-body').addEventListener('pm-dirty', () => {
+    if (pm.id === 'settings') pm.dirty = true;
+  });
   $('#btn-run').onclick = runScreen;
   $('#btn-scan').onclick = runScan;
   bindWatchlistPanel();
@@ -2220,8 +2442,15 @@ async function init() {
   document.addEventListener('click', e => {
     const det = e.target.closest('[data-detail]');
     if (det) { e.stopPropagation(); openDetail(det.dataset.detail); return; }
-    const row = e.target.closest('tr[data-code], .wrow[data-code]');
-    if (row && !e.target.closest('button')) openDetail(row.dataset.code);
+    const row = e.target.closest('tr[data-code], .wrow[data-code], tr[data-pm-row]');
+    if (!row || e.target.closest('button')) return;
+    // 弹窗里那份清单是主页表格的翻版：按行号回主页那张表里取代码
+    if (row.dataset.pmRow) {
+      const src = $$('#tbl-scan tbody tr')[+row.dataset.pmRow];
+      if (src) openDetail(src.dataset.code);
+      return;
+    }
+    openDetail(row.dataset.code);
   });
   $('#dw-close').onclick = closeDrawer;
   $('#mask').onclick = closeDrawer;
@@ -2254,8 +2483,10 @@ async function init() {
 
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    if (S.watchModalOpen) closeWatchModal();
-    else closeDrawer();
+    // 一层一层退：先关最上面那个
+    if (pm.id) closePane();
+    else if (S.detail) closeDrawer();
+    else if (S.watchModalOpen) closeWatchModal();
   });
 
   /* 窗口变大变小后重画所有画布：canvas 是位图，

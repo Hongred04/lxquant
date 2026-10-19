@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>lxquant · 量价低位选股</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0e14'/%3E%3Cpath d='M6 22l5-7 4 4 5-9 6 12' stroke='%232fd6a5' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=1.8.4" />
+<link rel="stylesheet" href="style.css?v=1.8.5" />
 </head>
 <body>
 <div id="app">
@@ -33,7 +33,7 @@
 
     <div class="side-foot">
       <div class="stat-line"><span>数据更新到</span><b id="f-data-date">—</b></div>
-      <div class="stat-line"><span>版本</span><b>v1.8.4</b></div>
+      <div class="stat-line"><span>版本</span><b>v1.8.5</b></div>
     </div>
   </aside>
 
@@ -154,13 +154,16 @@
           <button class="btn sm ghost" id="w-check" title="立刻重新看一遍，不用等 3 分钟">马上检查</button>
           <button class="btn sm ghost" id="w-sound" title="买点卖点弹出来的时候响不响">🔔 声音开</button>
           <button class="btn sm ghost" id="w-clear" title="把右上角还没关的提醒都清掉">清掉提醒</button>
+          <button class="btn sm ghost" data-open="watch" title="在整屏里看自选股，表格不再被挤窄">全部<em>⤢</em></button>
         </div>
         <div class="wl" id="w-list"></div>
         <div class="whints" id="w-hints" hidden></div>
       </div>
       <div class="panel">
-        <div class="ph"><b>这些人气股今天的表现</b><span class="spacer"></span><span class="muted" id="scan-meta"></span></div>
-        <div class="tablewrap">
+        <div class="ph"><b>这些人气股今天的表现</b><span class="spacer"></span><span class="muted" id="scan-meta"></span>
+          <button class="btn sm ghost" data-open="scan" title="在整屏里看，列宽给足">全部<em>⤢</em></button>
+        </div>
+        <div class="tablewrap" data-src="scan">
           <table class="grid" id="tbl-scan">
             <thead><tr>
               <th>代码</th><th>名称</th><th class="num">现价</th><th class="num">涨跌</th>
@@ -209,7 +212,9 @@
 
       <div class="row2" id="mem-row2" hidden>
         <div class="panel">
-          <div class="ph"><b>那一天之后，这些票怎么走的</b><span class="muted" id="mem-meta"></span></div>
+          <div class="ph"><b>那一天之后，这些票怎么走的</b><span class="muted" id="mem-meta"></span>
+            <button class="btn sm ghost" data-open="memday" title="在大窗口里看：图表、结论和明细表挤在一起太窄">新窗口打开<em>⤢</em></button>
+          </div>
           <canvas id="mem-chart" class="cv" height="220"></canvas>
         </div>
         <div class="panel">
@@ -219,8 +224,10 @@
       </div>
 
       <div class="panel" id="mem-table" hidden>
-        <div class="ph"><b>一只一只看</b><span class="muted" id="mem-sub"></span></div>
-        <div class="tablewrap" style="max-height:440px">
+        <div class="ph"><b>一只一只看</b><span class="muted" id="mem-sub"></span>
+          <button class="btn sm ghost" data-open="memday" title="在整屏里看这天的每一只">全部<em>⤢</em></button>
+        </div>
+        <div class="tablewrap" style="max-height:440px" data-src="memday">
           <table class="grid">
             <thead><tr>
               <th>代码</th><th>名称</th><th>哪一批</th><th class="num">选的时候</th>
@@ -233,8 +240,10 @@
       </div>
 
       <div class="panel" id="mem-days" hidden>
-        <div class="ph"><b>每天的成绩单</b><span class="muted">一天一行，看这套规则稳不稳定</span></div>
-        <div class="tablewrap" style="max-height:340px">
+        <div class="ph"><b>每天的成绩单</b><span class="muted">一天一行，看这套规则稳不稳定</span>
+          <button class="btn sm ghost" data-open="memdays" title="在整屏里看，一天一行不用滚小窗口">全部<em>⤢</em></button>
+        </div>
+        <div class="tablewrap" style="max-height:340px" data-src="memdays">
           <table class="grid">
             <thead><tr>
               <th>日期</th><th class="num">记了几只</th><th class="num">其中「能买」</th>
@@ -274,11 +283,12 @@
         <div class="bar"><i id="bt-bar"></i></div>
       </div>
       <div class="kpis" id="bt-kpis"></div>
+      <div class="kpis-more" id="bt-more"><button class="btn sm ghost" data-open="bt" title="在大窗口里看：KPI、收益曲线、卖出原因和明细细表">在整屏里看<em>⤢</em></button></div>
       <div class="empty-state" id="bt-empty">
         <b>还没检验过</b>
         <span>「开始检验」会拿过去一年的行情，按同一套买卖规则一笔一笔回放，告诉你这套规则过去赚不赚得到钱。<br>先选「检验多少只」和「看多久」，再点左上角的按钮。</span>
       </div>
-      <div class="row2">
+      <div class="row2" id="bt-row2">
         <div class="panel">
           <div class="ph"><b>累计收益走势</b><span class="muted">一笔一笔累加的收益率 %</span></div>
           <canvas id="eq-chart" class="cv" height="220"></canvas>
@@ -290,7 +300,7 @@
       </div>
       <div class="panel" id="bt-table">
         <div class="ph"><b>一笔一笔看</b><span class="muted" id="bt-meta"></span></div>
-        <div class="tablewrap" style="max-height:420px">
+        <div class="tablewrap" style="max-height:420px" data-src="bt">
           <table class="grid">
             <thead><tr><th>发现信号</th><th>买入</th><th class="num">买价</th><th>卖出</th>
               <th class="num">卖价</th><th class="num">持有天数</th><th class="num">赚了%</th>
@@ -359,11 +369,12 @@
         <div class="bar"><i id="pf-bar"></i></div>
       </div>
       <div class="kpis" id="pf-kpis"></div>
+      <div class="kpis-more" id="pf-more"><button class="btn sm ghost" data-open="pf" title="在大窗口里看：KPI、资金曲线、成本明细和成交记录">在整屏里看<em>⤢</em></button></div>
       <div class="empty-state" id="pf-empty">
         <b>还没模拟过</b>
         <span>「模拟一遍」会假装给你一笔本金，按同一套买卖规则真金白银地买、卖，算手续费和滑点，看看一年下来账户剩多少。<br>它比策略检验更接近真实情况：钱只有一份，买满了后面的信号就买不进去。</span>
       </div>
-      <div class="row2">
+      <div class="row2" id="pf-row2">
         <div class="panel">
           <div class="ph"><b>账户余额怎么走的</b><span class="muted">现金 + 持仓市值，扣掉手续费和滑点</span></div>
           <canvas id="pf-chart" class="cv" height="220"></canvas>
@@ -375,7 +386,7 @@
       </div>
       <div class="panel" id="pf-table">
         <div class="ph"><b>一买一卖都记下来</b><span class="muted" id="pf-meta"></span></div>
-        <div class="tablewrap" style="max-height:420px">
+        <div class="tablewrap" style="max-height:420px" data-src="pf">
           <table class="grid">
             <thead><tr><th>代码</th><th>名称</th><th>买入</th><th>卖出</th>
               <th class="num">股数</th><th class="num">买入花了</th><th class="num">卖出到手</th>
@@ -401,8 +412,11 @@
       <div class="meth-grid">
 
         <div class="panel">
-          <div class="ph"><b>软件挑股的五个条件</b><span class="muted">全满足才算「能买」</span></div>
-          <div class="meth-body">
+          <div class="ph"><b>软件挑股的五个条件</b><span class="muted">全满足才算「能买」</span>
+            <span class="spacer"></span>
+            <button class="btn sm ghost" data-open="method" data-tab="rule" title="在大窗口里逐条看这五个条件">逐条细看<em>⤢</em></button>
+          </div>
+          <div class="meth-body fold-part" data-part="rule">
             <div class="step">
               <b class="step-n">①</b>
               <div>
@@ -466,8 +480,11 @@
         </div>
 
         <div class="panel">
-          <div class="ph"><b>什么时候买、什么时候卖</b><span class="muted">软件已经定好，可在「参数设置」改</span></div>
-          <div class="meth-body">
+          <div class="ph"><b>什么时候买、什么时候卖</b><span class="muted">软件已经定好，可在「参数设置」改</span>
+            <span class="spacer"></span>
+            <button class="btn sm ghost" data-open="method" data-tab="trade" title="在大窗口里看买卖规则和买多少">细看<em>⤢</em></button>
+          </div>
+          <div class="meth-body fold-part" data-part="trade">
             <div class="step buy">
               <b class="step-n b">B</b>
               <div>
@@ -539,9 +556,28 @@
         <button class="btn ghost" id="btn-clear"><i data-ic="trash"></i>清空缓存</button>
       </div>
       <div class="set-grid" id="set-grid"></div>
+      <div class="muted set-tip">每张卡只放最常用的几项，点了「还有 N 项 / 开」把那一组摊开成一屏再来改。</div>
       </div>
     </section>
   </main>
+</div>
+
+<!-- ============ 二级弹窗：一个面板 / 一类设置，单独摊开成一屏 ============ -->
+<div class="modal-mask" id="pm-mask"></div>
+<div class="modal pm" id="page-modal" role="dialog" aria-modal="true" aria-labelledby="pm-title" hidden>
+  <div class="mh">
+    <div class="mh-main">
+      <b id="pm-title">—</b>
+      <span class="muted" id="pm-sub"></span>
+    </div>
+    <div class="mh-tools">
+      <div class="seg" id="pm-tabs" hidden></div>
+      <button class="btn sm primary" id="pm-save" hidden><i data-ic="save"></i>保存</button>
+      <button class="icon-btn" id="pm-close" title="关掉（Esc）"><i data-ic="x"></i></button>
+    </div>
+  </div>
+  <div class="mb" id="pm-body"></div>
+  <div class="mf"><span class="muted" id="pm-foot"></span><span class="spacer"></span><span class="muted">Esc 关掉</span></div>
 </div>
 
 <!-- ============ 详情抽屉 ============ -->
@@ -590,7 +626,7 @@
   </div>
   <div class="mf"><span class="muted" id="wm-foot"></span><span class="spacer"></span><span class="muted">点任意一只看详情 · Esc 关掉</span></div>
 </div>
-<script src="_demo.js?v=1.8.4"></script>
-<script src="app.js?v=1.8.4"></script>
+<script src="_demo.js?v=1.8.5"></script>
+<script src="app.js?v=1.8.5"></script>
 </body>
 </html>
