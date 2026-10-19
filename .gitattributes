@@ -1,0 +1,15 @@
+# 说明：这个仓库就在一台 Windows 机器上用，不做行尾自动归一化。
+# 强制 `* text=auto eol=lf` 会把 .bat 也改成 LF，cmd 解析 bat 时对行尾敏感，所以只标二进制。
+
+# 二进制，别当文本 diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gif binary
+*.xlsx binary
+*.zip binary
+
+# 这些按原文签出/入库，不许 git 自己转换
+启动选股.bat -text
+*.csv text eol=crlf
