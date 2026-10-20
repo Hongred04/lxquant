@@ -1517,7 +1517,7 @@ function renderBacktest() {
     { k: '一共几笔', v: s.count, s: s.open ? `已卖掉 ${s.closed} 笔 · 还有 ${s.open} 笔没到卖出条件` : `全部卖掉后结算 ${s.closed} 笔`, c: '' },
     { k: '多少笔赚钱', v: pct(s.win_rate, 1), s: `赚的比亏的多 ${s.profit_factor} 倍`, c: s.win_rate >= 50 ? 'up' : 'down' },
     { k: '平均一笔赚', v: (s.avg_ret > 0 ? '+' : '') + pct(s.avg_ret), s: `中间那个数 ${pct(s.med_ret)}`, c: s.avg_ret > 0 ? 'up' : 'down' },
-    { k: '一笔笔累加', v: (s.pnl > 0 ? '+' : '') + pct(s.pnl), s: '假设每笔都用全部钱', c: s.pnl > 0 ? 'up' : 'down' },
+    { k: '资金曲线', v: (s.pnl > 0 ? '+' : '') + pct(s.pnl), s: '每天等权摊到所有持仓', c: s.pnl > 0 ? 'up' : 'down' },
     { k: '赚最多的一笔', v: '+' + pct(s.max_win), s: `亏最多的一笔 ${pct(s.max_loss)}`, c: 'up' },
     { k: '平均拿几天', v: s.avg_hold + '天', s: '交易日，不含周末', c: 'warn' },
   ].map(x => `<div class="kpi ${x.c}"><div class="k">${x.k}</div><div class="v">${x.v}</div><div class="s">${x.s}</div></div>`).join('');

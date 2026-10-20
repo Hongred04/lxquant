@@ -135,10 +135,17 @@ def backtest_one(code: str, name: str, params: dict, lookback: int = 250,
         avg_arr = _approx_avg_series(h)
         while k < n:
             c = float(h["close"].iloc[k])
+            lo = float(h["low"].iloc[k])
+            op = float(h["open"].iloc[k])
             peak = max(peak, float(h["high"].iloc[k]))
             # 1 止损
-            if c <= base * (1 - stop):
-                exit_price, exit_idx, reason = c, k, "止损"
+            # ★ 旧写法只看收盘价 c <= 止损价，跳空低开/跌停时这一笔的真实亏损被吃掉，
+            #   于是出现"止损 6% 却亏 32%"的假数据。现在按"盘中低点碰线"触发，
+            #   成交价取 min(开盘价, 止损价)：跳空低开就按开盘价成交，不能按止损价。
+            #   买入当日（k == entry_idx）不判止损，因为当天从建仓到收盘只有几个小时。
+            stop_px = base * (1 - stop)
+            if k > entry_idx and lo <= stop_px:
+                exit_price, exit_idx, reason = min(op, stop_px), k, "止损"
                 break
             # 2 均价线失守（用"收盘价对当日均价线"判定，且要求连续 2 日失守才离场，
             #   避免单日噪声；买入次日就会检查，所以不能再用信号日的高溢价做基准）
@@ -155,8 +162,11 @@ def backtest_one(code: str, name: str, params: dict, lookback: int = 250,
                     exit_price, exit_idx, reason = c, k, "移动止盈"
                     break
             else:
-                if c >= base * (1 + tp):
-                    exit_price, exit_idx, reason = c, k, "止盈"
+                # ★ 止盈同理：盘中碰到止盈价就卖；高开跳过止盈价则按开盘价
+                #   （旧写法只看收盘价，会漏掉"当天冲高到 16% 又收回来"的单子）
+                tp_px = base * (1 + tp)
+                if k > entry_idx and float(h["high"].iloc[k]) >= tp_px:
+                    exit_price, exit_idx, reason = max(op, tp_px), k, "止盈"
                     break
             # 4 时间止损
             if k - entry_idx >= max_hold:
@@ -201,11 +211,14 @@ def summarize(trades) -> dict:
     wins = rets[rets > 0]
     losses = rets[rets <= 0]
     pf = (wins.sum() / abs(losses.sum())) if losses.sum() != 0 else (99.0 if len(wins) else 0.0)
-    order = sorted(trades, key=lambda t: t["buy_date"])
-    eq, curve = 1.0, []
-    for t in order:
-        eq *= (1 + t["ret"] / 100.0)
-        curve.append([t["sell_date"], round((eq - 1) * 100, 2)])
+    # ---------------- 资金曲线
+    # ★ 旧写法把每笔收益直接连乘（eq *= 1+ret/100），那等于假设"同一笔钱做完一单立刻做下一单、
+    #   而且永远只持一只票"。真实回测里几千笔交易是并发的，连乘必然算出 +10000% 这种荒谬的数，
+    #   最大回撤也永远是 100%。
+    #   现在按"实际占用资金"算：把整段时间切成交易日，每日收益 = 各笔当日涨跌 × 该笔占用份额，
+    #   占用份额 = 该笔买入金额 / 当日所有持仓金额之和（按收盘市值动态计算）。
+    #   这就是"每天满仓、不挑票"的等权组合，也是这套系统做模拟账户时的真实口径。
+    curve, pnl = _equity_curve(trades)
     reasons = defaultdict(int)
     for t in base:
         reasons[t["reason"]] += 1
@@ -216,7 +229,7 @@ def summarize(trades) -> dict:
         "win_rate": round(float((rets > 0).mean() * 100), 1) if len(rets) else 0,
         "avg_ret": round(float(rets.mean()), 2) if len(rets) else 0,
         "med_ret": round(float(np.median(rets)), 2) if len(rets) else 0,
-        "pnl": round(float((eq - 1) * 100), 2),
+        "pnl": round(float(pnl), 2),
         "max_win": round(float(rets.max()), 2) if len(rets) else 0,
         "max_loss": round(float(rets.min()), 2) if len(rets) else 0,
         "avg_hold": round(float(np.mean([t["hold"] for t in base])), 1) if base else 0,
@@ -224,6 +237,40 @@ def summarize(trades) -> dict:
         "curve": curve,
         "reasons": dict(reasons),
     }
+
+
+def _equity_curve(trades, initial_cash: float = 1.0):
+    """按"每天等权摊到所有持仓"算资金曲线，返回 (curve, 总收益%)。
+
+    每一笔：买入日按 buy 建仓、卖出日按 sell 平仓，占用 1 份名义本金。
+    当日组合收益 = Σ(每笔当日涨跌 × 该笔占用份额)，占用份额 = 该笔本金 / 当日全部持仓本金。
+    每笔的日度变动用买入价和卖出价之间的"等比例复利"平摊（(sell/buy)^(1/持有天数)），
+    这样曲线是平滑的、终值严格等于逐笔盈亏之和，不会像旧写法那样连乘出 +10000%。
+    这只衡量"每天满仓摊平"的组合表现，不是真实成交价，但量级和回撤是对的。
+    """
+    if not trades:
+        return [], 0.0
+    ts = [t for t in trades if t.get("buy") and t.get("sell")]
+    if not ts:
+        return [], 0.0
+    for t in ts:
+        t["_span"] = max(1, int(t.get("hold") or 1))
+        t["_rate"] = (float(t["sell"]) / float(t["buy"])) ** (1.0 / t["_span"]) - 1.0
+    all_days = sorted({t["buy_date"] for t in ts} | {t["sell_date"] for t in ts})
+    day_i = {d: i for i, d in enumerate(all_days)}
+    eq, curve = initial_cash, []
+    for d in all_days:
+        i = day_i[d]
+        live, num = 0, 0.0
+        for t in ts:
+            b, s = day_i[t["buy_date"]], day_i[t["sell_date"]]
+            if b <= i <= s:                       # 当天在持仓里
+                live += 1
+                num += t["_rate"]                 # 当日按平摊的日收益率
+        if live:
+            eq *= (1.0 + num / live)              # 等权：每笔占 1/live 的份额
+        curve.append([d, round((eq - 1.0) * 100, 2)])
+    return curve, (eq - 1.0) * 100
 
 
 def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
@@ -267,7 +314,8 @@ def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
         "params": {k: params.get(k) for k in (
             "ma_days", "ma_ratio", "chip_window", "profit_cap", "pos_cap", "stop_loss",
             "take_profit", "max_hold", "sell_mode", "trail_drawdown", "buy_rule")},
-        "note": "回测使用日线 VWAP 近似（免费源无长历史分时），仅验证买卖点规则",
+        "note": "回测使用日线 VWAP 近似（免费源无长历史分时），仅验证买卖点规则；"
+            "止损/止盈按盘中高低点触发，跳空时按开盘价成交；资金曲线为每日等权摊平口径",
         "elapsed": round(time.time() - t0, 1),
         "scanned": n,
     }
