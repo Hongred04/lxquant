@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """零依赖 HTTP 服务器（Windows 下 select 不支持管道的限制，改用 ThreadingHTTPServer）。"""
+import gzip
 import json
 import os
 import threading
@@ -10,13 +11,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import analyzer, backtest, config, datasource as ds, store
+from . import analyzer, backtest, config, datasource as ds, store, ta
 from . import indicators as ind
 from . import extdata as ext
 from .jsonutil import dumps
 
 ROOT = Path(__file__).resolve().parent.parent
-WEB = ROOT / "web"
+# 手机版把网页放在 lxquant 旁边的 web_m/（或由环境变量指过去），桌面版还是 web/
+WEB = Path(os.environ.get("LXQ_WEB") or (ROOT / ("web_m" if os.environ.get("LXQ_MOBILE") == "1" else "web")))
+APP_VERSION = "1.9.0"
 
 # ---------------------------------------------------------------- 任务状态
 class Job:
@@ -304,10 +307,17 @@ def stock_detail(code: str, params=None, weights=None):
         a["history"] = []
     # 技术指标快照（参考 QUANTAXIS QAIndicator 的口径）
     try:
-        from . import ta
         a["ta"] = ta.snapshot(d)
     except Exception:
         a["ta"] = {}
+    # 日 / 周 / 月 K 线（前复权，画图用）。日线取 640 根将近三年，周线两年多，
+    # 月线十年；带均线 / 布林 / MACD / KDJ / RSI / 量比，前端切周期不用再请求。
+    a["kline"] = {}
+    for _per in ("day", "week", "month"):
+        try:
+            a["kline"][_per] = ta.series(store.get_kline(code, _per))
+        except Exception:
+            a["kline"][_per] = {"bars": []}
     a["trend_img"] = None
     return a
 
@@ -349,11 +359,16 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     # ---------- 静态文件
-    def _static(self, path: str):
+    def _static(self, path: str, raw: bool = False):
         rel = unquote(path.lstrip("/")) or "index.html"
         if rel in ("", "/"):
             rel = "index.html"
         f = (WEB / rel).resolve()
+        # 有对应的 .min 产物就优先发压缩版（tools/build.js 生成）；?raw=1 可强制回源码调试
+        if not raw and f.suffix.lower() in (".js", ".css"):
+            hit = f.with_name(f.stem + ".min" + f.suffix)
+            if hit.is_file() and hit.stat().st_size > 0:
+                f = hit
         if not str(f).startswith(str(WEB.resolve())) or not f.is_file():
             self._send(404, b"not found", "text/plain; charset=utf-8")
             return
@@ -363,7 +378,24 @@ class Handler(BaseHTTPRequestHandler):
             ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml",
             ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json",
         }.get(ext, "application/octet-stream")
-        self._send(200, f.read_bytes(), ctype)
+        body = f.read_bytes()
+        # 文本资源 gzip：app.js 165K -> 41K，style.css 56K -> 12K。浏览器透明解压。
+        if ext in (".html", ".js", ".css", ".svg", ".json") and len(body) > 1024:
+            if "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
+                self.send_header("Cache-Control", "no-store")
+                gz = gzip.compress(body, 6)
+                self.send_header("Content-Length", str(len(gz)))
+                self.end_headers()
+                try:
+                    self.wfile.write(gz)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
+        self._send(200, body, ctype)
 
     # ---------- 路由
     def do_GET(self):
@@ -371,11 +403,34 @@ class Handler(BaseHTTPRequestHandler):
         p = u.path
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
+            if p == "/api/ping":
+                # 手机版 App 用它确认内嵌服务已经起来了
+                return self._json({"ok": True, "pong": time.time(), "version": APP_VERSION})
             if p == "/" or p.startswith("/static") or p.endswith((".js", ".css", ".svg", ".ico", ".png", ".html")):
-                return self._static(p.replace("/static/", "/") if p.startswith("/static") else p)
+                return self._static(p.replace("/static/", "/") if p.startswith("/static") else p,
+                                    raw=q.get("raw") in ("1", "true"))
             if p == "/api/config":
                 return self._json({"ok": True, **config.load_config(),
-                                   "cache": store.cache_info(), "version": "1.8.7"})
+                                   "cache": store.cache_info(), "version": APP_VERSION})
+            if p == "/api/strategies":
+                # 当前可用的策略方案 + 每一关的说明，界面上的「策略方案」下拉用它
+                from . import strategies as strats
+                return self._json({"ok": True,
+                                   "current": strats.current_key(config.load_config()["params"]),
+                                   "items": strats.all_strategies(),
+                                   "errors": strats.errors()})
+            if p == "/api/strategy/template":
+                from . import strategies as strats
+                return self._json({"ok": True, "text": strats.TEMPLATE,
+                                   "dir": os.path.join(str(config.DATA_DIR), "strategies")})
+            if p == "/api/strategy/reload":
+                # 改完 data/strategies/*.py 点一下「重新加载」，不用重启服务
+                from . import strategies as strats
+                n0 = len(strats.all_strategies())
+                strats.load_user()
+                items = strats.all_strategies()
+                return self._json({"ok": True, "count": len(items), "before": n0,
+                                   "items": items, "errors": strats.errors()})
             if p == "/api/job":
                 j = JOBS.get(q.get("id", ""))
                 if not j:
@@ -418,6 +473,23 @@ class Handler(BaseHTTPRequestHandler):
                 if q.get("overview"):
                     return self._json({"ok": True, **memory.overview(int(q.get("n") or 30))})
                 return self._json({"ok": True, "days": memory.list_days(int(q.get("n") or 60))})
+            if p == "/api/kline":
+                # 单独取某一个周期的 K 线（详情页默认已经从 /api/detail 里拿到三套，
+                # 这里是给以后加"下一段历史"之类的按需加载留的口子）
+                code = q.get("code", "")
+                per = q.get("period", "day")
+                if per not in ("day", "week", "month"):
+                    return self._err("period 只能是 day / week / month")
+                try:
+                    n = max(60, min(2000, int(q.get("n") or 640)))
+                except ValueError:
+                    n = 640
+                try:
+                    df = store.get_kline(code, per, n)
+                except Exception as e:
+                    return self._err(f"行情没取到：{e}", 502)
+                return self._json({"ok": True, "code": code, "period": per,
+                                   **ta.series(df, n)})
             if p == "/api/detail":
                 code = q.get("code", "")
                 if not code:
@@ -507,6 +579,12 @@ class Handler(BaseHTTPRequestHandler):
         p = urlparse(self.path).path
         b = self._body()
         try:
+            if p == "/api/strategy/new":
+                # 生成一份策略模板到 data/strategies，用户用记事本改就行
+                from . import strategies as strats
+                path = strats.new_file(str(b.get("name") or ""))
+                return self._json({"ok": True, "path": path,
+                                   "items": strats.all_strategies()})
             if p == "/api/config":
                 cfg = config.load_config()
                 cfg["params"].update(b.get("params") or {})
@@ -555,13 +633,13 @@ class Handler(BaseHTTPRequestHandler):
                 cfg = config.load_config()
                 j = start_job("backtest", job_backtest, cfg["params"], cfg["weights"],
                               int(b.get("limit", 40)), b.get("mode", "balanced"),
-                              b.get("codes") or None, int(b.get("lookback", 250)))
+                              b.get("codes") or None, int(b.get("lookback", 1000)))
                 return self._json({"ok": True, "job": j.as_dict()})
             if p == "/api/portfolio":
                 cfg = config.load_config()
                 j = start_job("portfolio", job_portfolio, cfg["params"], cfg["weights"],
                               int(b.get("limit", 40)), b.get("mode", "balanced"),
-                              b.get("codes") or None, int(b.get("lookback", 250)),
+                              b.get("codes") or None, int(b.get("lookback", 1000)),
                               float(b.get("initial_cash", 1000000)),
                               int(b.get("max_pos", 5)),
                               float(b.get("pos_pct", 0.2)),
@@ -606,6 +684,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(f"{type(e).__name__}: {e}", 500)
 
 
+def _make_server(host="127.0.0.1", port=8777):
+    return _Server((host, port), Handler)
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -619,7 +701,7 @@ class _Server(ThreadingHTTPServer):
 
 
 def serve(host="127.0.0.1", port=8777, open_browser=True):
-    srv = _Server((host, port), Handler)
+    srv = _make_server(host, port)
     url = f"http://{host}:{port}/"
     print("=" * 56)
     print("  lxquant 量价低位选股系统已启动")

@@ -40,7 +40,11 @@ _ALERTS_KEEP = 200
 
 # 每种提醒：冷却多久（分钟）不重复说。0 = 每次都报
 COOLDOWN = {
-    "sell.stop": 0,
+    # 止损原来写 0（"很重要，每次都要说"），可 check() 每 3 分钟跑一轮，
+    # 一只票一旦跌破止损，每轮都会生成新 sig、再弹一张卡 —— 这就是
+    # "一打开软件就一堆提醒弹出来"的来源。改成 6 小时：止损照样立刻报，
+    # 但不会没完没了地重复弹。
+    "sell.stop": 6 * 60,
     "sell.target": 24 * 60,
     "sell.ma": 24 * 60,
     "sell.trail": 24 * 60,
@@ -236,7 +240,6 @@ def _push(w: dict, kind: str, code: str, it: dict, extra: dict) -> dict:
     """把一条提醒写进队列。同一件事在冷却期内不重复写。"""
     tag, msg = TEXT.get(kind, ("提醒", ""))
     now = _dt.now()
-    sig = f"{code}|{kind}|{now.strftime('%Y-%m-%d')}"
     last = w["seen"].get(code + "|" + kind)
     cool = COOLDOWN.get(kind, 24 * 60)
     if cool and last:
@@ -245,6 +248,15 @@ def _push(w: dict, kind: str, code: str, it: dict, extra: dict) -> dict:
                 return {}
         except Exception:
             pass
+    # sig 里带上冷却窗口的起点，而不是"今天"：
+    # 写成"今天"的话，昨天弹过、用户没关的那条，今天会换个 sig 再生成一条，
+    # 队列里就攒出同一天两三条一模一样的提醒（"每次打开都弹"）。同一个冷却
+    # 窗口内永远是同一个 sig，队列里也就永远只有一条。
+    if cool:
+        win = now - timedelta(minutes=cool)
+        sig = f"{code}|{kind}|{win.strftime('%Y-%m-%d %H:%M')}"
+    else:
+        sig = f"{code}|{kind}|{now.strftime('%Y-%m-%d %H:%M')}"
     w["seen"][code + "|" + kind] = now.strftime("%Y-%m-%d %H:%M")
     al = {"sig": sig, "kind": "buy" if tag == "买点" else "sell", "why": kind.split(".")[-1],
           "tag": tag, "code": code, "name": it.get("name") or "",

@@ -25,7 +25,7 @@ from . import backtest as bt, store
 
 
 def build_trades(params: dict, weights: dict, codes=None, limit: int = 40,
-                 mode: str = "balanced", lookback: int = 250, progress=None,
+                 mode: str = "balanced", lookback: int = 1000, progress=None,
                  workers: int = 10):
     """第一阶段：逐票产出候选交易（不受资金约束），同时带回每只票的日线"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -55,7 +55,9 @@ def build_trades(params: dict, weights: dict, codes=None, limit: int = 40,
                 r = None
             if r and r.get("trades"):
                 trades.extend(r["trades"])
-            h = store.get_daily(code, 320)
+            # 和回测同口径：前复权长历史（不复权的价格曲线遇到送转是断的，
+            # 拿它给持仓估值会算出一笔根本不存在的巨亏）
+            h = store.get_daily_long(code, 1023)
             if h is not None and len(h):
                 daily[code] = {str(d)[:10]: float(c)
                                for d, c in zip(h["date"], h["close"])}
@@ -67,7 +69,7 @@ def build_trades(params: dict, weights: dict, codes=None, limit: int = 40,
 def run_portfolio(trades, daily, initial_cash: float = 1_000_000.0,
                   max_pos: int = 5, pos_pct: float = 0.2,
                   commission: float = 2.5e-4, min_comm: float = 5.0,
-                  stamp: float = 1e-3, slippage: float = 0.0) -> dict:
+                  stamp: float = 5e-4, slippage: float = 1e-3) -> dict:
     """第二阶段：在有限资金下按日撮合，产出真实资金曲线"""
     t0 = time.time()
     if not trades:
@@ -214,10 +216,16 @@ def run_portfolio(trades, daily, initial_cash: float = 1_000_000.0,
     # 曲线转成百分比（相对初始资金），前端直接画
     curve_pct = [[d, round((v / initial_cash - 1) * 100, 2)] for d, v, _ in curve]
     closed_sorted = sorted(closed, key=lambda c: c["sell_date"], reverse=True)
+    # 界面要写清楚这次到底覆盖了哪几年 —— 明细表是倒序的，第一屏永远是最近几笔，
+    # 不标区间的话很容易以为"早年的数据没有"
+    cov = {}
+    if curve:
+        cov = {"from": curve[0][0], "to": curve[-1][0], "days": len(curve)}
     return {
         "ok": True,
         "summary": summary,
         "curve": curve_pct,
+        "coverage": cov,
         "trades": closed_sorted[:300],
         "elapsed": round(time.time() - t0, 2),
         "note": "账户模型：等权仓位 + 佣金/印花税/滑点，逐日盯市；未必成交的候选会被跳过",
@@ -225,10 +233,15 @@ def run_portfolio(trades, daily, initial_cash: float = 1_000_000.0,
 
 
 def run(params: dict, weights: dict, codes=None, limit: int = 40, mode: str = "balanced",
-        lookback: int = 250, initial_cash: float = 1_000_000.0, max_pos: int = 5,
-        pos_pct: float = 0.2, commission: float = 2.5e-4, stamp: float = 1e-3,
-        slippage: float = 0.0, progress=None) -> dict:
-    """一站式：生成候选 → 组合撮合"""
+        lookback: int = 1000, initial_cash: float = 1_000_000.0, max_pos: int = 5,
+        pos_pct: float = 0.2, commission: float = 2.5e-4, stamp: float = 5e-4,
+        slippage: float = 1e-3, progress=None) -> dict:
+    """一站式：生成候选 → 组合撮合
+
+    费率按 A 股现行规则：印花税 0.05% 单边卖出（2023-08-28 起，原 0.1% 已减半）、
+    佣金万 2.5 双边（最低 5 元）、滑点默认 0.1% 每边。
+    原来 stamp=1e-3、slippage=0 会让模拟账户比实盘乐观不少。
+    """
     log = progress or (lambda **k: None)
     trades, daily, n = build_trades(params, weights, codes, limit, mode, lookback, progress)
     log(phase="bt", msg="账户撮合中…", pct=70)

@@ -7,6 +7,7 @@ from . import indicators as ind
 from . import datasource as ds
 from . import store
 from . import extdata as ext
+from . import strategies as strats
 
 
 def _num(v, nd=3):
@@ -102,24 +103,24 @@ def analyze(code: str, name: str = "", params: dict | None = None,
     vol = daily["volume"].astype(float).values
     vr5_20 = float(vol[-5:].mean() / vol[-20:].mean()) if len(vol) >= 20 and vol[-20:].mean() > 0 else None
 
-    chk_ma = bool(streak["ok"])
-    chk_tail = bool(tail_w["ok"])
-    # 尾盘买入策略：默认以 14:30 口径为准（用收盘价回测等于偷看未来）
-    tail_mode = str(p.get("entry_mode", "tail")) == "tail"
-    gate_ma = chk_tail if tail_mode else chk_ma
-    chk_chip = bool(chip["profit_ratio"] is not None and chip["profit_ratio"] <= profit_cap)
-    chk_pos = bool(pos["pos"] is not None and pos["pos"] <= pos_cap)
-    chk_trend = bool(above_ma) if p.get("ma_trend_enable", False) else True
-    chk_bottom = True
-    if p.get("bottom_enable", True):
-        # bottom_structure 的 ok 已经把振幅 / 斜率两个上限判进去了
-        chk_bottom = bool(bot.get("ok"))
+    # 所有的判定都交给策略插件：实盘和回测共用同一份 gate，
+    # 不会出现"回测在测 A、实盘在下 B"
+    strat = strats.get_current(p)
+    ctx = strats.Ctx(code, name, daily, k5=k5, rt=rt)
+    facts = strat.facts(ctx, p)
+    checks, gate_rows = strat.check_all(facts, ctx, p)
+    bot = facts.get("bottom") or {"ok": False, "amp": None, "slope": None,
+                                  "higher_low": False, "note": "策略没用这一关"}
+    chk_ma = bool(checks.get("close_ma", checks.get("ma")))
+    chk_bottom = bool(checks.get("bottom"))
 
     return {
         "code": code, "name": name or "", "price": price,
         "chg_pct": _num((rt or {}).get("chg_pct"), 2) if rt else _num((price / float(daily["close"].iloc[-2]) - 1) * 100, 2),
         "date": str(avx["date"].iloc[-1]) if not avx.empty else str(last["date"]),
         "stock_date": str(last["date"]),
+        "strategy": strat.key,
+        "gates": gate_rows,
         "avg": {
             "ok": bool(streak["ok"]), "need": ma_days, "have": streak["days"],
             "streak": streak["streak"], "detail": streak["detail"],
@@ -142,64 +143,34 @@ def analyze(code: str, name: str = "", params: dict | None = None,
             "ma5_gt_ma20": bool(ma5 and ma20 and ma5 > ma20),
             "vol_ratio": _num(vr5_20, 2),
         },
-        "checks": {
-            "ma": gate_ma, "close_ma": chk_ma, "tail": chk_tail,
-            "chip": chk_chip, "pos": chk_pos,
-            "trend": chk_trend, "bottom": chk_bottom,
-            "tail_watch": bool((tail_pv or {}).get("watch")),
-        },
+        "checks": checks,
         "score": 0.0,
     }
 
 
 # ---------------------------------------------------------------- 评分
 def score(a: dict, weights: dict, params: dict) -> float:
-    """
-    0~100 综合评分，全部来自可解释的线性映射：
-      资金强度 surplus  : 高于平均成本线的平均幅度，  +1% 得满分参考 3%
-                          （尾盘口径用 tail_surplus，和选股判定同一套数字）
-      筹码      profit  : 获利盘 0% -> 满分， >= profit_cap -> 0 分
-      低位      pos     : 分位 0 -> 满分,  >= pos_cap -> 0 分
-      结构      bottom  : 振幅越小 / 底部越高 得分越高
-      趋势      trend   : 站上 MA20 + MA5>MA20
-    """
-    w = weights or {}
-    if not a["checks"]["ma"]:
-        return 0.0
-    tail_mode = str(params.get("entry_mode", "tail")) == "tail"
-    sur_v = a["avg"].get("tail_surplus") if tail_mode else a["avg"].get("avg_surplus")
-    if sur_v is None:
-        sur_v = a["avg"].get("avg_surplus")
-    sur = max(0.0, (sur_v or 0) / 100.0)
-    s_sur = min(1.0, sur / 0.03) if sur_v is not None else 0.0
-
-    cap = float(params.get("profit_cap", 0.25)) or 0.25
-    pr = a["chip"].get("profit_ratio")
-    s_pro = 0.0 if pr is None else max(0.0, min(1.0, (cap - pr) / cap))
-    if pr is None:
-        s_pro = 0.0
-
-    pcap = float(params.get("pos_cap", 0.30)) or 0.30
-    ps = a["pos"].get("pos")
-    s_pos = 0.0 if ps is None else max(0.0, min(1.0, (pcap - ps) / pcap))
-
-    amp_cap = float(params.get("bottom_amp", 0.40)) or 0.40
-    amp = a["bottom"].get("amp")
-    s_bot = 0.0 if amp is None else max(0.0, min(1.0, (amp_cap - amp) / amp_cap))
-    if a["bottom"].get("higher_low"):
-        s_bot = min(1.0, s_bot + 0.2)
-
-    s_tr = 0.5 * (1.0 if a["trend"]["above"] else 0.0) + 0.5 * (1.0 if a["trend"]["ma5_gt_ma20"] else 0.0)
-
-    total = (
-        w.get("surplus", 25) * s_sur
-        + w.get("profit", 25) * s_pro
-        + w.get("position", 25) * s_pos
-        + w.get("bottom", 15) * s_bot
-        + w.get("trend", 10) * s_tr
-    )
-    norm = sum(abs(w.get(k, 0)) for k in ("surplus", "profit", "position", "bottom", "trend")) or 100.0
-    return round(total / norm * 100, 2)
+    """综合评分，具体怎么打分由当前策略决定（见 strategies/*.py 的 score 方法）。"""
+    p = dict(params or {})
+    p["_weights"] = weights or {}
+    strat = strats.get(a.get("strategy") or strats.current_key(p))
+    ctx = strats.Ctx(a.get("code", ""), a.get("name", ""),
+                     pd.DataFrame({"close": [a.get("price") or 0]}),
+                     i=0, shared={"_pre": a})
+    # 直接把 analyze 已经算好的字段喂成事实表，不重复计算
+    facts = strats.Facts({
+        "streak": lambda: {"ok": a["checks"].get("close_ma", a["checks"].get("ma")),
+                           "avg_surplus": (a.get("avg") or {}).get("avg_surplus")},
+        "tail": lambda: {"ok": a["checks"].get("tail"),
+                         "avg_surplus": (a.get("avg") or {}).get("tail_surplus"),
+                         "preview": (a.get("avg") or {}).get("preview")},
+        "chip": lambda: a.get("chip") or {},
+        "pos": lambda: a.get("pos") or {},
+        "bottom": lambda: a.get("bottom") or {},
+        "trend": lambda: a.get("trend") or {"above": False, "ma5": None, "ma20": None,
+                                             "ma5_gt_ma20": False},
+    })
+    return strat.score(facts, a.get("checks") or {}, p)
 
 
 # ---------------------------------------------------------------- 买入信号

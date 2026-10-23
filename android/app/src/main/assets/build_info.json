@@ -1,0 +1,9 @@
+{
+  "app": "量价选股",
+  "version": "1.9.0",
+  "versionCode": 3,
+  "python": "3.12.15",
+  "abi": "arm64-v8a",
+  "port": 8765,
+  "layout": 5
+}

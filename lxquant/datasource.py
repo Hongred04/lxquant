@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""行情数据源（纯标准库 urllib，规避 requests/akshare 依赖问题）
+"""行情数据源（纯标准库，规避 requests/akshare 依赖问题）
 
 实测可用的数据源（2026-10 本机）：
   * 新浪 hq.sinajs.cn 实时行情
@@ -7,12 +7,28 @@
   * 新浪 vip.stock.finance.sina.com.cn 全市场股票列表
   * 腾讯 ifzq.gtimg.cn 日线(前复权) / 5 分钟 / 当日分时
 东方财富、网易、qt.gtimg.cn 在本机被网络策略拦截。
+
+关于速度（2026-10 实测，240 只 30 分钟线）
+------------------------------------------------
+以前每发一个请求就新建一条 TCP+TLS 连接、拿完就关（Connection: close），
+还得不到压缩：单请求 263ms，48 线程峰值只有 74 只/秒。
+改成"每线程一条长连接 + gzip"之后：单请求 75ms，24 线程 206 只/秒（2.8x），
+而且线程数从 48 降到 24 反而更快 —— 握手成本太高时，堆线程只是互相排队。
+
+  urllib + close      24 线程 49.7 只/秒 | 48 线程 73.9 只/秒 | 96 线程 63.7 只/秒
+  长连接 + gzip        24 线程 206 只/秒 | 48 线程 185.7 只/秒 | 96 线程 121.8 只/秒
+
+所以：_fetch 一律走 _CONN 里的线程本地连接池，只在出错时重连。
 """
+import gzip
+import http.client
+import socket
 import json
 import re
+import threading
 import time
 import urllib.parse
-import urllib.request
+import zlib
 
 import pandas as pd
 
@@ -24,19 +40,78 @@ class DataError(RuntimeError):
     pass
 
 
+# 每线程一条长连接：{ (scheme, netloc): HTTPConnection }
+# http.client 的连接对象不是线程安全的，锁在池里共享会互相踩；一个线程一条最省事，
+# 也不会像"共享一个 Session"那样把并发压成串行。
+_CONN = threading.local()
+
+
+def _pool() -> dict:
+    p = getattr(_CONN, "pool", None)
+    if p is None:
+        p = _CONN.pool = {}
+    return p
+
+
+def _get_conn(key, timeout: float):
+    c = _pool().get(key)
+    if c is None:
+        scheme, netloc = key
+        cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+        c = cls(netloc, timeout=timeout)
+        _pool()[key] = c
+    return c
+
+
+def _drop_conn(key):
+    c = _pool().pop(key, None)
+    if c is None:
+        return
+    # 先 shutdown 再 close：直接 close 在 TLS 上偶尔会等对端回 close_notify，
+    # 一个卡住就拖住整条线程（实测 80 次 close 能吃掉 10 秒）。
+    try:
+        s = getattr(c, "sock", None)
+        if s is not None:
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+        c.close()
+    except Exception:
+        pass
+
+
 def _fetch(url: str, headers: dict | None = None, timeout: int = 15,
            retries: int = 3, encoding: str = "utf-8") -> str:
-    h = {"User-Agent": UA, "Accept": "*/*", "Connection": "close"}
+    """GET 一个 URL，返回解码后的文本。走线程本地长连接 + gzip。"""
+    h = {"User-Agent": UA, "Accept": "*/*", "Accept-Encoding": "gzip, deflate"}
     if headers:
         h.update(headers)
+    u = urllib.parse.urlsplit(url)
+    key = (u.scheme or "https", u.netloc)
+    path = u.path + (("?" + u.query) if u.query else "")
     last = None
     for i in range(retries):
         try:
-            req = urllib.request.Request(url, headers=h)
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return r.read().decode(encoding, "ignore")
+            c = _get_conn(key, timeout)
+            c.request("GET", path, headers=h)
+            r = c.getresponse()
+            body = r.read()                     # 必须读完，否则这条连接不能复用
+            enc = (r.getheader("Content-Encoding") or "").lower()
+            if enc == "gzip":
+                body = gzip.decompress(body)
+            elif enc == "deflate":
+                body = zlib.decompress(body)
+            if r.status != 200:
+                raise DataError(f"HTTP {r.status}")
+            return body.decode(encoding, "ignore")
         except Exception as e:  # noqa: BLE001
             last = e
+            _drop_conn(key)                     # 连接可能已经废了，下一次重连
+            # 连接被对端回收（长时间扫描中间断一下）是常态，立刻重连重试，不用等
+            if isinstance(e, (http.client.RemoteDisconnected, http.client.BadStatusLine,
+                              ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+                continue
             time.sleep(0.35 * (i + 1))
     raise DataError(f"请求失败 {url[:90]} -> {type(last).__name__}: {last}")
 
@@ -81,9 +156,13 @@ _LIST_CACHE = (None, 0.0)      # (全市场清单, 拉到的时刻)
 def stock_list(force: bool = False) -> pd.DataFrame:
     """全市场 A 股快照（代码 名称 现价 涨跌幅 成交量 成交额 换手率 市盈率 等）
 
-    一页一页翻要拉五十多次请求、二十多秒，所以结果在内存里放着十分钟：
-    自选股输入框靠它按名字找股票，不然每敲一个字都得干等半分钟；
+    一页 100 只（num 传多大都只给 100），全市场 56 页，串行翻页约 6 秒，
+    结果在内存里放 10 分钟：自选股输入框靠它按名字找股票，不然每敲一个字都得干等。
     选股要最新价会传 force=True 绕开缓存。
+
+    试过并发翻页（8 页一批），被这个接口限流：同一批 56 页有时 1.2 秒、
+    有时 33 秒（无报错，纯变慢），比稳定的 6 秒更难接受，所以保持串行。
+    东财 clist（一次请求拿全市场）在本机被网络策略拦掉，也用不了。
     """
     if not force:
         old, at = _LIST_CACHE
@@ -134,6 +213,12 @@ def stock_list(force: bool = False) -> pd.DataFrame:
         raise DataError("股票列表获取失败")
     df = df[df["code"].str.len() == 6]
     df = df.reset_index(drop=True)
+    # 完整性校验：A 股现在 5000+ 只，只有几百只说明翻页中途被限流打断了。
+    # 以前不看这个，半截数据会被当成完整快照写进缓存 —— 后果很隐蔽：
+    # 只拿到第一页 100 只（全是北交所），exclude_bj 一过滤 → 池子 0 只 →
+    # 选股页、回测、模拟账户集体"没数据"，而且 5 分钟内一直是这个结果。
+    if len(df) < 1000:
+        raise DataError(f"股票列表不完整（只拿到 {len(df)} 只，可能被限流）")
     globals()["_LIST_CACHE"] = (df, time.time())   # 赋值要在 globals() 里，不然会变成局部变量
     return df
 
@@ -199,14 +284,50 @@ def _tencent_kline(sym: str, scale: str, count: int) -> list:
     return []
 
 
-def daily(code: str, count: int = 260) -> pd.DataFrame:
-    """
-    不复权日线（新浪 scale=240，最多约 300 根）。
-    注意：分时均价线策略本质上是"价格 vs 当日 VWAP"，用不复权数据与实盘一致。
-    字段: date open close high low volume(股) amount(元)
+def tencent_kline(code: str, period: str = "day", count: int = 640) -> pd.DataFrame:
+    """腾讯前复权 K 线：period = day / week / month。
+
+    为什么要有这个：新浪的 K 线接口只能取到约 300 根日线（一年出头），
+    详情页想画"日 / 周 / 月 K"就得往回看到好几年，周线月线更是没法从
+    5 分钟线拼出来 —— 腾讯 fqkline 一次给到 640 根，周期原生就分开算好了。
+    字段: date open close high low volume(股)   （前复权口径，除权不影响形态）
     """
     sym = full(code)
-    arr = _sina_kline(sym, 240, min(int(count), 300))
+    kind = {"day": "day", "week": "week", "month": "month"}.get(str(period), "day")
+    # 注意域名：web.ifzq.gtimg.cn 在本机会直接回 501（等了很久才发现），
+    # 不带 web. 前缀的 ifzq.gtimg.cn 才通。换回 web. 就是整片请求失败。
+    url = (f"https://ifzq.gtimg.cn/appstock/app/fqkline/get?"
+           f"param={sym},{kind},,,{min(int(count), 800)},qfq")
+    j = json.loads(_fetch(url, headers={"Referer": "https://gu.qq.com/"}))
+    node = (j.get("data") or {}).get(sym) or {}
+    arr = node.get(f"qfq{kind}") or node.get(kind) or []
+    rows = []
+    for x in arr:
+        if not isinstance(x, (list, tuple)) or len(x) < 6:
+            continue
+        rows.append({
+            "date": str(x[0])[:10], "open": _f(x[1]), "close": _f(x[2]),
+            "high": _f(x[3]), "low": _f(x[4]), "volume": _f(x[5]) * 100,   # 手 -> 股
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        raise DataError(f"{code} {period} K 线为空")
+    df = df[(df["close"] > 0) & (df["high"] > 0)].drop_duplicates("date")
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def daily(code: str, count: int = 260) -> pd.DataFrame:
+    """
+    不复权日线（新浪 scale=240，最多 1023 根 ≈ 4.2 年）。
+    注意：分时均价线策略本质上是"价格 vs 当日 VWAP"，用不复权数据与实盘一致。
+    字段: date open close high low volume(股) amount(元)
+
+    以前这里写死 300 根 —— 那是想当然，实测 datalen 给到 1023 一样能返回
+    （再大就报错）。选股只用最近 320 根，所以放开上限不影响实盘口径；
+    回测要"穿越牛熊"，走下面的 daily_long。
+    """
+    sym = full(code)
+    arr = _sina_kline(sym, 240, min(int(count), 1023))
     rows = []
     for x in arr:
         rows.append({
@@ -216,6 +337,88 @@ def daily(code: str, count: int = 260) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     if df.empty:
         raise DataError(f"{code} 日线为空")
+    df["amount"] = df["volume"] * (df[["high", "low", "close"]].sum(axis=1) / 3)
+    df = df.dropna(subset=["close"]).drop_duplicates("date")
+    return df.sort_values("date").reset_index(drop=True)
+
+
+# ---------------------------------------------------------------- 长历史（回测用）
+def qfq_factors(sym: str) -> list:
+    """新浪复权因子 [(除权日, 因子)]，升序。
+
+    新浪的 f 是"复权后 / 复权前"的累积系数，所以历史价要**除以**它才对
+    （乘上去会凭空造出除权跳空 —— 实测 000001 乘完多出一个 -12% 的假跳空，
+    除完 60 只主板票 8 处最大 38.7% 的跳空全部归零）。
+    没有除权记录时返回空表，等于不复权。
+    """
+    try:
+        txt = _fetch(f"https://finance.sina.com.cn/realstock/company/{sym}/qfq.js",
+                     headers={"Referer": "https://finance.sina.com.cn/"})
+        a, b = txt.find("{"), txt.rfind("}")
+        if a < 0 or b < 0:
+            return []
+        j = json.loads(txt[a:b + 1])
+        return sorted((x["d"], float(x["f"])) for x in (j.get("data") or []))
+    except Exception:
+        return []
+
+
+def index_daily(sym: str = "sh000001") -> pd.DataFrame:
+    """指数日线（不复权，最多 1023 根）。给 market_state 判断市场状态用。
+
+    注意 sym 要带市场前缀（sh000001 是上证指数，不带前缀的 000001 是平安银行）。
+    """
+    arr = _sina_kline(sym, 240, 1023)
+    rows = [{
+        "date": x["day"][:10], "open": _f(x["open"]), "close": _f(x["close"]),
+        "high": _f(x["high"]), "low": _f(x["low"]), "volume": _f(x.get("volume")),
+    } for x in arr]
+    df = pd.DataFrame(rows)
+    if df.empty:
+        raise DataError(f"{sym} 指数日线为空")
+    return df.dropna(subset=["close"]).drop_duplicates("date").sort_values(
+        "date").reset_index(drop=True)
+
+
+def daily_long(code: str, count: int = 1023) -> pd.DataFrame:
+    """长历史日线（**前复权**，最多 1023 根 ≈ 4.2 年），回测和模拟账户用。
+
+    为什么单独做一个：
+      * 选股用的是不复权（要和实盘的 14:30 价对上），不能动它；
+      * 但回测要跨好几年，中途必然遇到送转分红。用不复权序列算收益，
+        一次 10 送 4 就会在账上凭空多出 -29%，整份回测直接作废。
+    所以这里把新浪的不复权日线 × 新浪自己的复权因子，拼成前复权序列。
+    两个接口都不需要额外依赖，一只票两次请求。
+    字段与 daily() 一致，volume 不调整（筹码分布只看相对比例）。
+    """
+    import bisect
+
+    sym = full(code)
+    arr = _sina_kline(sym, 240, min(int(count), 1023))
+    if not arr:
+        raise DataError(f"{code} 日线为空")
+    fac = qfq_factors(sym)
+    fdates = [x[0] for x in fac]
+
+    def _fac(d: str) -> float:
+        """这个日期适用的复权因子（取 <= 该日期的最后一条）"""
+        if not fac:
+            return 1.0
+        i = bisect.bisect_right(fdates, d) - 1
+        return fac[i][1] if i >= 0 else 1.0
+
+    base = _fac(str(arr[-1]["day"])[:10])
+    rows = []
+    for x in arr:
+        d = str(x["day"])[:10]
+        k = (_fac(d) / base) if base else 1.0
+        rows.append({
+            "date": d,
+            "open": _f(x["open"]) / k, "close": _f(x["close"]) / k,
+            "high": _f(x["high"]) / k, "low": _f(x["low"]) / k,
+            "volume": _f(x.get("volume")),          # 成交量不跟着调，筹码只看比例
+        })
+    df = pd.DataFrame(rows)
     df["amount"] = df["volume"] * (df[["high", "low", "close"]].sum(axis=1) / 3)
     df = df.dropna(subset=["close"]).drop_duplicates("date")
     return df.sort_values("date").reset_index(drop=True)

@@ -127,6 +127,16 @@ def _run_once(reason: str, store: bool = True, limit: int | None = None) -> None
                 server._save_last_screen(r)
             except Exception:
                 pass
+        # 选股记忆：自动选股也要记一笔。界面上写的是"自动的、手动的都算"，
+        # 但以前只有手动点「立即选股」才走 memory.save_result，自动扫描全漏了 —
+        # 结果记忆页里只有你偶尔手点的那几天，看起来像"软件很少选股"。
+        # 试算（还没定型的名单）由 save_result 内部按 basis 挡掉，这里不用判断。
+        if store:
+            try:
+                from . import memory
+                memory.save_result(r)
+            except Exception:
+                pass
     except Exception as e:  # noqa: BLE001
         with _LOCK:
             _STATE["last_error"] = f"{type(e).__name__}: {e}"

@@ -38,3 +38,19 @@ web/_backup/
 *.log
 _srv.err
 _server_log.txt
+
+# 前端压缩产物（由 tools/build.js 生成，可随时重建；提交它们是为了
+# 直接双击运行不带 node 的机器也能吃到压缩版，见 README「构建」一节）
+# web/app.min.js
+# web/style.min.css
+
+# ============ 安卓：构建产物与二进制 ============
+
+# APK 产物（一个 38MB，随时能重打）
+android/dist/*.apk
+# 中间产物（classes、对齐前后的包、解包出来的 py/）
+android/build/
+# Python 代码包与标准库 pyc（pack_py.py 重新生成；标准库那份需要 CPython 3.12 才能编）
+android/app/src/main/assets/*.zip
+# 签名密钥：本机私有，绝不进仓库
+android/signkey.ks

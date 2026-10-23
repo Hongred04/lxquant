@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>lxquant · 量价低位选股</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0e14'/%3E%3Cpath d='M6 22l5-7 4 4 5-9 6 12' stroke='%232fd6a5' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=1.8.7" />
+<link rel="stylesheet" href="style.css?v=1.9.0" />
 </head>
 <body>
 <div id="app">
@@ -24,7 +24,7 @@
     <nav class="nav">
       <button class="ni active" data-view="screen"><i data-ic="target"></i><span>选股</span></button>
       <button class="ni" data-view="watch"><i data-ic="grid"></i><span>盯盘 / 自选</span></button>
-      <button class="ni" data-view="backtest"><i data-ic="chart"></i><span>策略检验</span></button>
+      <button class="ni" data-view="backtest"><i data-ic="chart"></i><span>信号检验</span></button>
       <button class="ni" data-view="portfolio"><i data-ic="wallet"></i><span>模拟账户</span></button>
       <button class="ni sub" data-view="memory"><i data-ic="memory"></i><span>记忆</span></button>
       <button class="ni sub" data-view="method"><i data-ic="book"></i><span>使用说明</span></button>
@@ -33,7 +33,11 @@
 
     <div class="side-foot">
       <div class="stat-line"><span>数据更新到</span><b id="f-data-date">—</b></div>
-      <div class="stat-line"><span>版本</span><b>v1.8.7</b></div>
+      <div class="stat-line"><span>版本</span><b>v1.9.0</b></div>
+      <!-- 亮暗切换：固定在左下角，带中文名字，一眼能找到 -->
+      <button class="theme-btn" id="theme-btn" title="切换亮色 / 暗色主题">
+        <i data-ic="moon"></i><span id="theme-txt">暗色</span>
+      </button>
     </div>
   </aside>
 
@@ -45,7 +49,7 @@
       <div class="tb-left">
         <h1 id="view-title">选股</h1>
         <span class="tb-hint" id="view-hint">软件自己会选，你回来直接看名单就行</span>
-        <!-- 从主页面钻进来的二级页（策略检验 / 模拟账户 / 使用说明 / 参数设置）显示这条面包屑，一键退回主页面 -->
+        <!-- 从主页面钻进来的二级页（信号检验 / 模拟账户 / 使用说明 / 参数设置）显示这条面包屑，一键退回主页面 -->
         <nav class="crumb" id="crumb" hidden>
           <button class="crumb-back" id="crumb-back"><i data-ic="back"></i>操作台</button>
           <span class="crumb-sep">/</span>
@@ -57,9 +61,6 @@
           <i class="ap-dot"></i><b>自动选股</b><span id="auto-txt">准备中…</span>
         </span>
       </div>
-      <button class="icon-btn theme-btn" id="theme-btn" title="切换亮色 / 暗色主题">
-        <i data-ic="moon"></i>
-      </button>
     </header>
 
     <!-- ---------- 选股视图 ---------- -->
@@ -70,9 +71,9 @@
         <label class="inl">看多少只
           <select id="limit-sel">
             <option value="0" selected>自动（跟着参数走）</option>
-            <option value="600">600 只 · 约 40 秒</option>
-            <option value="1500">1500 只 · 约 2 分钟</option>
-            <option value="6000">全部 5500 只 · 约 8 分钟</option>
+            <option value="600">600 只 · 约 20 秒</option>
+            <option value="1500">1500 只 · 约 50 秒</option>
+            <option value="6000">全部 5500 只 · 约 3 分钟</option>
           </select>
         </label>
         <button class="btn primary" id="btn-run" title="平时不用点，软件会自己选"><i data-ic="play"></i>立即选股</button>
@@ -81,6 +82,8 @@
         <input class="search" id="q" placeholder="代码 / 名称搜索" />
         <button class="btn ghost" id="btn-export"><i data-ic="download"></i>导出CSV</button>
       </div>
+
+      <div class="mktbar" id="mkt-bar" hidden></div>
 
       <div class="hl" id="hl" hidden></div>
 
@@ -95,7 +98,7 @@
           <span class="muted" id="res-meta">尚未运行</span>
           <span class="spacer"></span>
           <button class="btn sm ghost" id="btn-detail-more" title="看这一次为什么只选出来这些：五关各筛掉多少、平均数字、口径">全部数据</button>
-          <a class="ph-link" data-go="backtest" href="?v=backtest" title="拿过去的数据把同一套买卖规则跑一遍，看历史上赚没赚过">成绩怎么样<em id="ph-bt-badge">策略检验</em></a>
+          <a class="ph-link" data-go="backtest" href="?v=backtest" title="拿过去的数据把同一套买卖规则跑一遍，看这些信号本身好不好">信号好不好<em id="ph-bt-badge">信号检验</em></a>
         </div>
         <div class="tablewrap">
           <table class="grid" id="tbl-screen">
@@ -256,11 +259,17 @@
       </div>
     </section>
 
-    <!-- ---------- 策略检验 ---------- -->
+    <!-- ---------- 信号检验（只管信号质量，钱的事在「模拟账户」） ---------- -->
     <section class="view" id="view-backtest">
       <div class="hd">
       <header class="topbar"></header>
       <div class="toolbar">
+        <label class="inl">检验范围
+          <select id="bt-scope">
+            <option value="market" selected>全市场抽样</option>
+            <option value="today">只看今天的名单</option>
+          </select>
+        </label>
         <label class="inl">检验多少只
           <select id="bt-limit">
             <option value="20">20 只（快）</option>
@@ -270,28 +279,30 @@
         </label>
         <label class="inl">看多久          <select id="bt-lookback">
             <option value="120">近半年</option>
-            <option value="250" selected>近一年</option>
-            <option value="300">近一年半</option>
+            <option value="250">近一年</option>
+            <option value="500">近两年</option>
+            <option value="750">近三年</option>
+            <option value="1000" selected>近四年（全部）</option>
           </select>
         </label>
         <button class="btn primary" id="btn-bt"><i data-ic="play"></i>开始检验</button>
         <span class="spacer"></span>
-        <span class="chip warn">用历史数据回头验证：按同样的规则买卖，过去赚没赚过</span>
+        <span class="chip warn">只看信号本身好不好，不涉及钱；能赚多少请看「模拟账户」</span>
       </div>
       <div class="progress-wrap" id="bt-prog" hidden>
         <div class="pg-head"><span id="bt-msg">准备中…</span><b id="bt-pct">0%</b></div>
         <div class="bar"><i id="bt-bar"></i></div>
       </div>
       <div class="kpis" id="bt-kpis"></div>
-      <div class="kpis-more" id="bt-more"><button class="btn sm ghost" data-open="bt" title="在大窗口里看：KPI、收益曲线、卖出原因和明细细表">在整屏里看<em>⤢</em></button></div>
+      <div class="kpis-more" id="bt-more"><button class="btn sm ghost" data-open="bt" title="在大窗口里看：KPI、单笔收益分布、卖出原因和明细细表">在整屏里看<em>⤢</em></button></div>
       <div class="empty-state" id="bt-empty">
         <b>还没检验过</b>
-        <span>「开始检验」会拿过去一年的行情，按同一套买卖规则一笔一笔回放，告诉你这套规则过去赚不赚得到钱。<br>先选「检验多少只」和「看多久」，再点左上角的按钮。</span>
+        <span>「开始检验」会拿过去一年的行情，按同一套买卖规则一笔一笔回放，告诉你这些信号本身值不值得跟。<br>这里只看信号质量，不看钱 —— 想知道一笔本金最后能变成多少，去「模拟账户」。</span>
       </div>
       <div class="row2" id="bt-row2">
         <div class="panel">
-          <div class="ph"><b>累计收益走势</b><span class="muted">一笔一笔累加的收益率 %</span></div>
-          <canvas id="eq-chart" class="cv" height="220"></canvas>
+          <div class="ph"><b>一笔一笔赚了多少</b><span class="muted">每笔的净收益率 %，按区间分堆</span></div>
+          <div id="bt-dist" class="reason-box"></div>
         </div>
         <div class="panel">
           <div class="ph"><b>为什么卖出的</b></div>
@@ -304,8 +315,9 @@
           <table class="grid">
             <thead><tr><th>发现信号</th><th>买入</th><th class="num">买价</th><th>卖出</th>
               <th class="num">卖价</th><th class="num">持有天数</th><th class="num">赚了%</th>
+              <th class="num" title="扣掉佣金、印花税、过户费、滑点之前的毛利">扣前%</th>
               <th>为什么卖</th><th class="num">当时套牢盘%</th><th class="num">当时价格位置%</th></tr></thead>
-            <tbody id="tb-bt"><tr class="empty"><td colspan="10">点「开始检验」</td></tr></tbody>
+            <tbody id="tb-bt"><tr class="empty"><td colspan="11">点「开始检验」</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -317,6 +329,12 @@
       <div class="hd">
       <header class="topbar"></header>
       <div class="toolbar">
+        <label class="inl">检验范围
+          <select id="pf-scope">
+            <option value="market" selected>全市场抽样</option>
+            <option value="today">只看今天的名单</option>
+          </select>
+        </label>
         <label class="inl">检验多少只
           <select id="pf-limit">
             <option value="20">20 只（快）</option>
@@ -326,8 +344,10 @@
         </label>
         <label class="inl">看多久          <select id="pf-lookback">
             <option value="120">近半年</option>
-            <option value="250" selected>近一年</option>
-            <option value="300">近一年半</option>
+            <option value="250">近一年</option>
+            <option value="500">近两年</option>
+            <option value="750">近三年</option>
+            <option value="1000" selected>近四年（全部）</option>
           </select>
         </label>
         <label class="inl">假如有          <select id="pf-cash">
@@ -372,7 +392,7 @@
       <div class="kpis-more" id="pf-more"><button class="btn sm ghost" data-open="pf" title="在大窗口里看：KPI、资金曲线、成本明细和成交记录">在整屏里看<em>⤢</em></button></div>
       <div class="empty-state" id="pf-empty">
         <b>还没模拟过</b>
-        <span>「模拟一遍」会假装给你一笔本金，按同一套买卖规则真金白银地买、卖，算手续费和滑点，看看一年下来账户剩多少。<br>它比策略检验更接近真实情况：钱只有一份，买满了后面的信号就买不进去。</span>
+        <span>「模拟一遍」会假装给你一笔本金，按同一套买卖规则真金白银地买、卖，算手续费和滑点，看看一年下来账户剩多少。<br>它比「信号检验」更接近真实情况：钱只有一份，买满了后面的信号就买不进去。</span>
       </div>
       <div class="row2" id="pf-row2">
         <div class="panel">
@@ -406,7 +426,7 @@
       <div class="toolbar">
         <span class="muted">都是一句话能讲清的规则，挑着看就行</span>
         <span class="spacer"></span>
-        <a class="btn ghost sm" data-go="backtest" href="?v=backtest">看看历史成绩<em>策略检验</em></a>
+        <a class="btn ghost sm" data-go="backtest" href="?v=backtest">看看信号质量<em>信号检验</em></a>
         <a class="btn ghost sm" data-go="settings" href="?v=settings">改门槛<em>参数设置</em></a>
       </div>
       <div class="meth-grid">
@@ -532,7 +552,7 @@
                 <tr><td class="k">套牢盘怎么算</td><td>用每天的换手率往前推：换手多的一天就把老筹码冲掉得多，换手少的股票筹码记得久（算法参考开源项目 adata）</td></tr>
                 <tr><td class="k">节假日</td><td>软件自带 2022-2026 年交易日历，离线就能判断今天开不开市</td></tr>
                 <tr><td class="k">缓存</td><td>日线 6 小时、盘中 5 分钟更新一次，所以再扫会快很多</td></tr>
-                <tr><td class="k">界面</td><td>右上角可切换亮色 / 暗色，你自己选的那个会被记住</td></tr>
+                <tr><td class="k">界面</td><td>左下角「亮色 / 暗色」按钮可切换主题，你自己选的那个会被记住</td></tr>
               </tbody>
             </table>
             <div class="hintline" style="margin-top:10px">本软件只做数据统计和规则筛选，不构成任何投资建议。过去的成绩不代表以后也能赚。</div>
@@ -571,11 +591,11 @@
       <span class="muted" id="pm-sub"></span>
     </div>
     <div class="mh-tools">
-      <div class="seg" id="pm-tabs" hidden></div>
       <button class="btn sm primary" id="pm-save" hidden><i data-ic="save"></i>保存</button>
       <button class="icon-btn" id="pm-close" title="关掉（Esc）"><i data-ic="x"></i></button>
     </div>
   </div>
+  <div class="pm-tabbar" id="pm-tabbar" hidden><div class="seg" id="pm-tabs" hidden></div></div>
   <div class="mb" id="pm-body"></div>
   <div class="mf"><span class="muted" id="pm-foot"></span><span class="spacer"></span><span class="muted">Esc 关掉</span></div>
 </div>
@@ -607,16 +627,18 @@
       <span class="muted" id="wm-sub"></span>
     </div>
     <div class="mh-tools">
-      <div class="seg" id="wm-tabs">
-        <button data-wt="gates" class="on">五关各筛掉多少</button>
-        <button data-wt="stats">汇总数字</button>
-        <button data-wt="watch">值得盯着</button>
-      </div>
-      <div class="seg" id="wm-filter" hidden>
-        <button data-wf="all" class="on">全部</button>
-        <button data-wf="near">只差一项</button>
-      </div>
       <button class="icon-btn" id="wm-close" title="关掉（Esc）"><i data-ic="x"></i></button>
+    </div>
+  </div>
+  <div class="pm-tabbar">
+    <div class="seg" id="wm-tabs">
+      <button data-wt="gates" class="on">五关各筛掉多少</button>
+      <button data-wt="stats">汇总数字</button>
+      <button data-wt="watch">值得盯着</button>
+    </div>
+    <div class="seg" id="wm-filter" hidden>
+      <button data-wf="all" class="on">全部</button>
+      <button data-wf="near">只差一项</button>
     </div>
   </div>
   <div class="mb">
@@ -626,7 +648,7 @@
   </div>
   <div class="mf"><span class="muted" id="wm-foot"></span><span class="spacer"></span><span class="muted">点任意一只看详情 · Esc 关掉</span></div>
 </div>
-<script src="_demo.js?v=1.8.7"></script>
-<script src="app.js?v=1.8.7"></script>
+<script src="_demo.js?v=1.9.0"></script>
+<script src="app.js?v=1.9.0"></script>
 </body>
 </html>

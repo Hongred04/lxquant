@@ -86,6 +86,11 @@ def _today_ok(df) -> bool:
     优先读 date 列：日线的 index 是 RangeIndex，拿 index 去比日期是错的
     （这正是之前日线缓存从来不命中的原因）。
     """
+    return _covers(df, _want_date())
+
+
+def _covers(df, want: str) -> bool:
+    """缓存最后一根的日期 >= want？判断不了就当它还行，交给上层兜底。"""
     try:
         if df is None or not len(df):
             return False
@@ -97,9 +102,28 @@ def _today_ok(df) -> bool:
         if d is None:
             d = df.index[-1]
         s = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
-        return s >= _want_date()
+        return s >= want
     except Exception:
-        return True          # 判断不了就当它还行，交给上层兜底
+        return True
+
+
+def _daily_want_date() -> str:
+    """日线缓存"应该覆盖到"的日期 —— 盘中要放宽到上一个交易日。
+
+    新浪的日线在盘中**不返回当天那一根**（今天这根要收盘后才吐出来）。
+    所以盘中拿"今天"去卡日线缓存，永远比不过：每一只票、每一次扫描都会重拉一遍，
+    而重拉回来的还是同一份（最后一根是昨天）的数据。全市场一圈就是 4900 次白跑的请求，
+    实测每只 318ms，光这一项就占掉扫描时间的四分之一。
+    今天的价格另有来源（实时行情 rt + 分钟线），日线只负责历史结构（筹码、位置、趋势），
+    因此盘中口径放宽到"上一个交易日"是等价的，不是妥协。
+    """
+    if _in_session() and _now_hm() >= "09:35":
+        prev = (_dt.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            return ext.last_trade_day(prev) or prev
+        except Exception:
+            return prev
+    return _want_date()
 
 
 # ---------------------------------------------------------------- 文件操作
@@ -115,15 +139,23 @@ def _fresh(path: Path, ttl: int) -> bool:
 
 
 def _dump(obj, path: Path):
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "wb") as f:
-        pickle.dump(obj, f, protocol=4)
-    tmp.replace(path)
+    # 缓存只是加速用：磁盘满了 / 目录无权限（安卓私有目录被清）也不能把整次选股带崩
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        with open(tmp, "wb") as f:
+            pickle.dump(obj, f, protocol=4)
+        tmp.replace(path)
+    except (OSError, pickle.PickleError, RecursionError):
+        pass
 
 
 def _load(path: Path):
-    with open(path, "rb") as f:
-        return pickle.load(f)
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except (OSError, pickle.UnpicklingError, EOFError, AttributeError, ImportError, ValueError):
+        raise
 
 
 # ---------------------------------------------------------------- 股票列表
@@ -131,24 +163,59 @@ def get_list(force=False):
     p = _p("stock_list.pkl")
     if not force and _fresh(p, LIST_TTL):
         try:
-            return _load(p)
+            df = _load(p)
+            if df is not None and len(df) >= 1000:
+                return df
         except Exception:
             pass
-    df = ds.stock_list()
+    try:
+        df = ds.stock_list()
+    except Exception:
+        # 拉不到完整的就用旧快照顶着：一份两小时前的全市场名单，
+        # 也远好过"只有 100 只"的半截数据（那会让池子直接变 0 只）
+        if p.exists():
+            try:
+                old = _load(p)
+                if old is not None and len(old) >= 1000:
+                    return old
+            except Exception:
+                pass
+        raise
     _dump(df, p)
     return df
 
 
 # ---------------------------------------------------------------- 日线
+def get_daily_cached(code, count=320):
+    """只读盘上的日线缓存，绝不联网。盘上没有就返回 None。
+
+    给「回看历史」这类场景用：它只需要选出来那天到最近一个收盘日的价格，
+    今天这根还没收盘，追不追都不影响结论。而盘中 get_daily 会因为
+    "缓存最后一根不是今天"判定过期，每只票都重新联网抓一次，
+    回看一页几十只票要等 40 秒。宁可用旧一天的收盘价，也别让人干等。
+    """
+    code = ds.norm(code)
+    p = _p(f"d_{code}.pkl")
+    try:
+        if not p.exists():
+            return None
+        df = _load(p)
+        if df is None or len(df) < min(count, 60):
+            return None
+        return df
+    except Exception:
+        return None
+
+
 def get_daily(code, count=320, force=False):
     code = ds.norm(code)
     p = _p(f"d_{code}.pkl")
     if not force and _fresh(p, DAY_TTL if _in_session() else IDLE_TTL):
         try:
             df = _load(p)
-            if len(df) >= min(count, 60) and _today_ok(df):
+            if len(df) >= min(count, 60) and _covers(df, _daily_want_date()):
                 return df
-            # 缓存是昨天以前的 → 不管 TTL 多新，今天的数据还没进来，重新取
+            # 缓存连"上一个交易日"都没覆盖到 → 确实缺数据，重新取
         except Exception:
             pass
     try:
@@ -260,6 +327,83 @@ def get_5min(code, count=1023, force=False):
     return df
 
 
+def get_kline(code, period: str = "day", count: int = 640, force=False):
+    """日 / 周 / 月前复权 K 线（详情页画图用，不走 5 分钟线那套均价策略的数据）。
+
+    缓存键带周期号：kd_600519.pkl / kw_600519.pkl / km_600519.pkl。
+    有效期沿用日线那套（盘中 6 小时 / 非交易时段 6 小时）—— 画图不需要逐笔精确，
+    但最后一根必须覆盖到"此刻应有的最新交易日"，否则今天的新 K 线就画不出来。
+    """
+    code = ds.norm(code)
+    period = period if period in ("day", "week", "month") else "day"
+    p = _p(f"k{period[0]}_{code}.pkl")
+    if not force and _fresh(p, DAY_TTL if _in_session() else IDLE_TTL):
+        try:
+            df = _load(p)
+            if len(df) >= 30 and _today_ok(df):
+                return df
+        except Exception:
+            pass
+    try:
+        df = ds.tencent_kline(code, period, count)
+    except Exception:
+        if p.exists():
+            return _load(p)            # 拉不到就用旧缓存兜底，宁可晚一天也别画不出图
+        if period == "day":
+            return get_daily(code, min(int(count), 300))   # 腾讯挂了退回新浪日线
+        raise
+    _dump(df, p)
+    return df
+
+
+def get_daily_long(code, count=1023, force=False):
+    """长历史**前复权**日线（最多 1023 根 ≈ 4.2 年），只给回测和模拟账户用。
+
+    和 get_daily 分开两条缓存（dl_ vs d_）的理由：
+      * 选股要的是不复权（要和实盘 14:30 的价对上），一根都不许动；
+      * 回测跨好几年，必须前复权，否则一次 10 送 4 就在账上多出 -29%。
+    混用一个缓存键会互相覆盖，所以各存各的。
+    """
+    code = ds.norm(code)
+    p = _p(f"dl_{code}.pkl")
+    if not force and _fresh(p, DAY_TTL if _in_session() else IDLE_TTL):
+        try:
+            df = _load(p)
+            if len(df) >= 200 and _covers(df, _daily_want_date()):
+                return df
+        except Exception:
+            pass
+    try:
+        df = ds.daily_long(code, count)
+    except Exception:
+        if p.exists():
+            return _load(p)          # 取不到就用旧缓存，宁可旧一天也别让回测跑不动
+        raise
+    _dump(df, p)
+    return df
+
+
+def get_kline_cached(code, period: str = "day", count: int = 640):
+    """只读盘上的前复权 K 线缓存，绝不联网。盘上没有就返回 None。
+
+    给「回看历史涨跌」用：算跨期收益必须用前复权价，否则中途送转分红会把
+    涨跌幅算成暴跌（10 送 3 就是 -23%）。但回看一页要看上百只票，
+    不能让每只都去联网 —— 先由 memory 那边并发预热，这里只负责读。
+    """
+    code = ds.norm(code)
+    period = period if period in ("day", "week", "month") else "day"
+    p = _p(f"k{period[0]}_{code}.pkl")
+    try:
+        if not p.exists():
+            return None
+        df = _load(p)
+        if df is None or len(df) < 30:
+            return None
+        return df
+    except Exception:
+        return None
+
+
 def clear_cache(kind: str | None = None) -> int:
     n = 0
     for f in CACHE_DIR.glob("*.pkl"):
@@ -273,16 +417,43 @@ def clear_cache(kind: str | None = None) -> int:
     return n
 
 
+_CI_CACHE = {"at": 0.0, "val": None}
+
+
 def cache_info() -> dict:
-    files = list(CACHE_DIR.glob("*.pkl"))
-    size = sum(f.stat().st_size for f in files)
+    """缓存目录概况。
+
+    这里以前对每个 .pkl 各 stat 两遍（算总大小、再算最新修改日），
+    一万五千个文件要 10 秒；而 /api/config 每次请求都调它，
+    手机打开时会卡在「正在读取…」。现在只 stat 一遍并缓存 3 秒。
+    """
+    now = time.time()
+    if _CI_CACHE["val"] is not None and now - _CI_CACHE["at"] < 3.0:
+        return dict(_CI_CACHE["val"])
+    try:
+        files = list(CACHE_DIR.glob("*.pkl"))
+    except OSError:
+        files = []
+    size = 0
+    newest = 0.0
+    for f in files:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        size += st.st_size
+        if st.st_mtime > newest:
+            newest = st.st_mtime
     # 用最新那个缓存文件的修改日期当"数据更新到"；界面原来显示的是本机日期，
     # 周末/节假日打开会显示当天，让人误以为行情是新的
     last = ""
-    try:
-        if files:
-            last = _dt.fromtimestamp(max(f.stat().st_mtime for f in files)).strftime("%Y-%m-%d")
-    except Exception:
-        last = ""
-    return {"files": len(files), "size_mb": round(size / 1048576, 2),
-            "last_update": last, "dir": str(CACHE_DIR)}
+    if newest > 0:
+        try:
+            last = _dt.fromtimestamp(newest).strftime("%Y-%m-%d")
+        except Exception:
+            last = ""
+    val = {"files": len(files), "size_mb": round(size / 1048576, 2),
+           "last_update": last, "dir": str(CACHE_DIR)}
+    _CI_CACHE["at"] = now
+    _CI_CACHE["val"] = dict(val)
+    return val

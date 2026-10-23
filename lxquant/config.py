@@ -9,7 +9,8 @@ _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _HHMM_RANGE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$")
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
+# 数据目录：桌面版用 ROOT/data；安卓版由 LXQ_DATA 指到 App 私有目录（解压出来的包是只读的）
+DATA_DIR = Path(os.environ.get("LXQ_DATA") or (ROOT / "data")).resolve()
 CACHE_DIR = DATA_DIR / "cache"
 EXPORT_DIR = DATA_DIR / "export"
 for _d in (DATA_DIR, CACHE_DIR, EXPORT_DIR):
@@ -19,6 +20,9 @@ CONFIG_FILE = DATA_DIR / "config.json"
 
 # ---------------------------------------------------------------- 默认参数
 DEFAULT_PARAMS = {
+    # ---- 策略方案（换一套选股逻辑只要改这里，见 lxquant/strategies/）----
+    "strategy": "ma_cost_low",  # 用哪个方案；data/strategies/ 里的新方案也会出现在界面上
+
     # ---- 分时均价线 ----
     "ma_days": 3,              # 连续多少天收盘价站上分时均价线
     "ma_ratio": 1.000,         # 收盘价 >= 当日均价线 * 该系数（1.000 = 只要站上）
@@ -29,7 +33,7 @@ DEFAULT_PARAMS = {
 
     # ---- 自动化：打开就扫、盘中定时扫、尾盘终极扫 ----
     "auto_scan": True,         # 打开软件自动选一次
-    "auto_limit": 600,         # 自动模式扫描只数（600 只约 40 秒，全市场约 8 分钟）
+    "auto_limit": 600,         # 自动模式扫描只数（600 只约 20 秒，全市场约 3 分钟）
     "auto_hours": "09:35-15:00",  # 自动盯盘时段，非交易时段不开工
     "auto_every": 300,         # 盘中自动重扫间隔（秒），0 = 不自动轮询
     "auto_final": "14:50",     # 尾盘终极扫的时刻（给出可直接下单的名单）
@@ -63,8 +67,28 @@ DEFAULT_PARAMS = {
     # ---- 均线趋势 ----
     "ma_trend_enable": False,  # 站上 MA20（趋势过滤，默认关闭：低位策略与趋势过滤天然冲突，可作可选加分项）
     "ma_trend_period": 20,
+
+    # ---- 市场状态开关 ----
+    # 这套规则是「超跌反转」，只在大盘真弱时才有胜算（165 笔回测：
+    # 指数在 MA20 下方 1% 以上时胜率 52%、均 +1.51%；在 MA20 上方时胜率 25%、均 -1.27%）。
+    # 所以市场状态不匹配时，宁可不出名单，也不要把钱送进接盘位。
+    "market_gate": True,       # 开关：不匹配时只出观察池、不出可买名单
+    "market_gate_pct": 1.0,    # 放行条件：上证指数比 MA20 低几个百分点
+
     # ---- 性能 ----
-    "workers": 48,             # 并发线程数（新浪接口实测 100 并发仍稳定）
+    # 并发线程数。改成"每线程一条长连接 + gzip"之后，24~32 是关键点：
+    # 实测 240 只 30 分钟线，12→134 只/秒、24→200、32→194、48→165。
+    # 48 以上反而变慢（线程只是互相排队），所以别再往上加。
+    "workers": 32,
+
+    # ---- 回测成本（不填这笔钱，回测永远是"微微赚钱"，实盘必亏）----
+    "cost_on": True,           # 回测是否扣成本（关掉只是为了做对比实验）
+    "commission": 0.00025,     # 佣金率，双边各收一次（万 2.5）
+    "min_comm": 5.0,           # 单笔最低佣金（元）
+    "stamp": 0.0005,           # 印花税，仅卖出收取（2023-08-28 起由万 10 减半为万 5）
+    "transfer": 0.00001,       # 过户费，双边（万分之 0.1）
+    "slippage": 0.001,         # 滑点，每边千分之一
+    "notional": 20000.0,       # 假设单笔金额，用于摊薄"最低 5 元佣金"
 
     # ---- 买卖点 ----
     "buy_rule": "pullback",    # buy_rule: next_open | next_open_break | pullback
@@ -112,10 +136,16 @@ def _norm(params: dict) -> dict:
         p["auto_limit"] = max(100, min(6000, int(p["auto_limit"] or DEFAULT_PARAMS["auto_limit"])))
     if p.get("auto_every") is not None:
         p["auto_every"] = max(0, int(p["auto_every"]))
-    for k in ("auto_scan", "auto_final_enabled"):
+    for k in ("auto_scan", "auto_final_enabled", "market_gate"):
         if k in p:
             v = p[k]
             p[k] = v if isinstance(v, bool) else str(v).strip().lower() not in ("0", "false", "off", "no", "")
+    # 市场状态阈值：上证指数比 MA20 低几个百分点才放行（0~5 之间）
+    if "market_gate_pct" in p:
+        try:
+            p["market_gate_pct"] = max(0.0, min(5.0, float(p["market_gate_pct"])))
+        except Exception:
+            p["market_gate_pct"] = DEFAULT_PARAMS["market_gate_pct"]
     return p
 
 

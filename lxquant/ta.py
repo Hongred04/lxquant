@@ -107,6 +107,63 @@ def VOL_RATIO(volume, n=5):
     return (v / base).fillna(1.0)
 
 
+# ------------------------------------------------------------------ 绘图用序列
+def series(hist: pd.DataFrame, max_bars: int = 780) -> dict:
+    """把一根根 K 线要一起画的东西全部算成等长数组（给前端 K 线图用）。
+
+    一次算全，前端只负责画：均线 / 布林带 / MACD / KDJ / RSI / 量比。
+    K 线的周期由调用方决定（日 / 周 / 月），这里不关心 —— 公式在哪个周期上
+    算都是一样的，所以周线月线的指标也是"同口径"的。
+    NaN 统一转成 None：json 里 NaN 不是合法数字，浏览器解析会直接报错。
+    """
+    if hist is None or len(hist) < 5:
+        return {"bars": []}
+    h = hist.reset_index(drop=True).tail(int(max_bars)).reset_index(drop=True)
+    c, hh, ll, v = h["close"], h["high"], h["low"], h["volume"]
+
+    def arr(series_or_none):
+        if series_or_none is None:
+            return None
+        out = []
+        for x in pd.Series(series_or_none).tolist():
+            try:
+                fx = float(x)
+                out.append(round(fx, 3) if np.isfinite(fx) else None)
+            except Exception:
+                out.append(None)
+        return out
+
+    ma = {f"ma{n}": arr(MA(c, n)) for n in (5, 10, 20, 30, 60)}
+    bup, bmid, bdn = BOLL(c)
+    dif, dea, macd = MACD(c)
+    k, d, j = KDJ(hh, ll, c)
+    r6, r12, r24 = RSI(c, 6), RSI(c, 12), RSI(c, 24)
+    vr = VOL_RATIO(v, 5)
+
+    def r3(x):
+        return round(float(x), 3) if np.isfinite(float(x)) else None
+
+    bars = []
+    for i, row in enumerate(h.itertuples()):
+        o, cl, hi, lo = float(row.open), float(row.close), float(row.high), float(row.low)
+        bars.append({
+            "d": str(row.date),
+            "o": r3(o), "c": r3(cl), "h": r3(hi), "l": r3(lo),
+            "v": float(row.volume) if np.isfinite(float(row.volume)) else 0.0,
+            "pc": None if i == 0 else r3(float(h["close"].iloc[i - 1])),
+        })
+    vol_ma = {f"v{n}": arr(MA(v, n)) for n in (5, 10)}
+    return {
+        "bars": bars,
+        "ma": ma,
+        "boll": {"up": arr(bup), "mid": arr(bmid), "dn": arr(bdn)},
+        "macd": {"dif": arr(dif), "dea": arr(dea), "hist": arr(macd)},
+        "kdj": {"k": arr(k), "d": arr(d), "j": arr(j)},
+        "rsi": {"r6": arr(r6), "r12": arr(r12), "r24": arr(r24)},
+        "vol": {"ma5": vol_ma["v5"], "ma10": vol_ma["v10"], "ratio": arr(vr)},
+    }
+
+
 # ------------------------------------------------------------------ 汇总
 def snapshot(hist: pd.DataFrame) -> dict:
     """

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from . import analyzer, datasource as ds, extdata as ext, indicators as ind, store
+from . import strategies as strats
 
 
 # ---------------------------------------------------------------- 基础过滤
@@ -35,29 +36,42 @@ def prefilter(df: pd.DataFrame, params: dict) -> pd.DataFrame:
 
 def balance_pool(df: pd.DataFrame, limit: int, mode: str = "all") -> pd.DataFrame:
     """
-    抽样控制：mode=all 全部；mode=balanced 按板块比例抽样，保证各板块都有代表。
+    抽样控制：mode=all 全部；mode=balanced 按成交额分位网格抽样。
+
+    ★ 原来这里是 np.linspace 等距抽样，结果是「样本量」滑块换的不是样本量，
+      而是换了一整批股票：limit=20 与 limit=40 的池子只重合 4/17。
+      同一套参数 limit=60 回测 +1.58%、limit=200 只有 +0.12%，纯粹是抽样运气。
+
+    改成"固定置换 + 取前 N 个"后有三个性质：
+      1) 可复现：同一个 limit 永远给同一批股票；
+      2) 严格包含：limit=20 的股票一定全部出现在 limit=40 里（取的是同一个
+         置换的前缀），改样本量才是真的"加样本"，不是换一批票；
+      3) 分层：置换用 Van der Corput 序列生成，按成交额排序后的名次被打散，
+         取前 N 个天然覆盖大中小盘，不会只剩大票或只剩小票。
     """
     if len(df) <= limit:
-        return df
+        return df.reset_index(drop=True)
     if mode == "all":
-        return df
-    boards = [
-        ("沪市主板", df["code"].str.startswith(("600", "601", "603", "605"))),
-        ("深市主板", df["code"].str.startswith(("000", "001", "002", "003"))),
-        ("创业板", df["code"].str.startswith(("300", "301"))),
-        ("科创板", df["code"].str.startswith("688")),
-    ]
-    frames = []
-    for name, mask in boards:
-        sub = df[mask]
-        if sub.empty:
-            continue
-        quota = max(1, int(limit * len(sub) / len(df)))
-        # 按成交额均匀抽样，覆盖大中小盘
-        idx = np.linspace(0, len(sub) - 1, min(quota, len(sub)), dtype=int)
-        frames.append(sub.sort_values("amount", ascending=False).iloc[idx])
-    out = pd.concat(frames).drop_duplicates("code")
-    return out.head(limit).reset_index(drop=True)
+        return df.reset_index(drop=True)
+    d = df.sort_values("amount", ascending=False, na_position="last")
+    d = d.reset_index(drop=True)
+    n = len(d)
+    if limit <= 1:
+        return d.iloc[:max(limit, 1)].reset_index(drop=True)
+
+    # Van der Corput（基 2）：把 0..n-1 均匀打散。这个序列只跟 n 有关，
+    # 跟 limit 无关，所以不同 limit 拿到的都是同一个置换的前缀 → 天然嵌套。
+    def vdc(k: int) -> float:
+        v, denom = 0.0, 1.0
+        while k:
+            k, r = divmod(k, 2)
+            denom *= 2
+            v += r / denom
+        return v
+
+    order = sorted(range(n), key=lambda k: (vdc(k + 1), k))
+    idx = sorted(order[:limit])
+    return d.iloc[idx].sort_values("amount", ascending=False).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------- 单只处理
@@ -157,7 +171,7 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
     if bool(params.get("real_turnover", True)):
         try:
             log(phase="scan", msg=f"预热股本数据（{n} 只）…", pct=6)
-            got = ext.prefetch_shares(cand["code"].tolist(), workers=min(workers, 32))
+            got = ext.prefetch_shares(cand["code"].tolist(), workers=min(workers, 12))
             if got:
                 log(phase="scan", msg=f"股本数据就绪（{got} 只）", pct=7)
         except Exception:
@@ -187,7 +201,11 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
                 results.append(a)
                 # 只差最后一两个条件的，作为"观察池"展示，避免命中 0 只时界面空白
                 c = a["checks"]
-                if c["ma"] and sum(1 for k, v in c.items() if k != "tail_watch" and v) >= 3:
+                # 「差最后一项」的口径要随策略的关卡数变：单关策略只有 0/1，不能拿 2 去卡
+                gk = [g.key for g in strats.get_current(params).gate_list(params)]
+                n_all = len(gk) or 1
+                n_ok = sum(1 for k in gk if c.get(k))
+                if n_ok >= max(1, n_all - 1):
                     a["watch"] = _miss_note(a, params)
                     watch.append(a)
                 elif c.get("tail_watch"):
@@ -195,10 +213,6 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
                     tf = str(params.get("tail_from", "14:30"))
                     a["watch"] = (f"试算已经达标，等 {tf} 再确认一次" if tf != "close"
                                   else "试算已经达标，等收盘确认")
-                    watch.append(a)
-                elif c.get("tail") and c.get("chip") and c.get("pos"):
-                    # 三条硬条件全过，只差横盘/趋势这类"软过滤"：放观察池，让人自己判断
-                    a["watch"] = _miss_note(a, params)
                     watch.append(a)
             if done % 5 == 0 or done == n:
                 el = max(time.time() - t1, 0.1)
@@ -217,6 +231,33 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
 
     items.sort(key=lambda x: (-x["score"], -_sur(x)))
     watch.sort(key=lambda x: (-x["score"], -_sur(x)))
+
+    # ---- 市场状态开关（market_state）----
+    # 这套规则是"超跌反转"，只在大盘真弱（指数在 MA20 下方）时才有胜算。
+    # 市场状态不匹配时不产生可买名单，但把"本来会选中的"放进观察池，
+    # 免得用户看到空表以为软件坏了。见 market_state 的模块说明。
+    ms, gated = {}, False
+    try:
+        from . import market_state
+        ms = market_state.state()
+        # gated 表示"市场状态不匹配"，跟这次有没有选出票无关 ——
+        # 界面要能看出「现在不该玩这套规则」，而不是等空表才解释
+        gated = not market_state.allow(params, ms)
+    except Exception:
+        ms, gated = {}, False
+    if gated and items:
+        reason = ""
+        try:
+            reason = market_state.why(params, ms)
+        except Exception:
+            reason = "市场状态不匹配"
+        for a in items:
+            a["watch"] = reason
+            a["gated"] = True
+            watch.append(a)
+        items = []
+        watch.sort(key=lambda x: (-x["score"], -_sur(x)))
+
     for i, a in enumerate(items, 1):
         a["rank"] = i
         a["plan"] = analyzer.plan_targets(a["price"], a, params)
@@ -225,19 +266,20 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
         a["plan"] = analyzer.plan_targets(a["price"], a, params)
 
     from collections import Counter
-    funnel = {
-        "ma": sum(1 for a in results if a["checks"]["ma"]),
-        "ma_close": sum(1 for a in results if a.get("checks", {}).get("close_ma")),
-        "chip": sum(1 for a in results if a["checks"]["chip"]),
-        "pos": sum(1 for a in results if a["checks"]["pos"]),
-        "bottom": sum(1 for a in results if a["checks"]["bottom"]),
-        "trend": sum(1 for a in results if a["checks"]["trend"]),
+    # 漏斗按当前策略的关卡动态生成：换方案界面上自动跟着变，不用改前端
+    cur = strats.get_current(params)
+    gate_keys = [g.key for g in cur.gate_list(params)]
+    funnel = {k: sum(1 for a in results if (a.get("checks") or {}).get(k)) for k in gate_keys}
+    funnel.update({
+        "ma_close": sum(1 for a in results if (a.get("checks") or {}).get("close_ma")),
         "streak": dict(Counter(min(a["avg"]["streak"], 6) for a in results)),
         "tail_from": params.get("tail_from", "14:30"),
         "entry_mode": params.get("entry_mode", "tail"),
         "tail_watch": sum(1 for a in results if a["checks"].get("tail_watch")),
         "preview_at": params.get("preview_at"),
-    }
+        "strategy": cur.key,
+        "gates": [{"key": g.key, "label": g.label} for g in cur.gate_list(params)],
+    })
     log(phase="done", msg=f"命中 {len(items)} 只", pct=100)
     if errs:
         log(phase="warn", msg="失败样例：" + "; ".join(
@@ -251,9 +293,10 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
             "scanned": n, "failed": fails, "hit": len(items),
             "elapsed": round(time.time() - t0, 1),
             "mode": mode, "limit": limit,
-            # preview = 尾盘前试算（今天用的是"截至此刻"的价，还没定型）
-            "basis": ("preview" if params.get("preview_at")
-                      else ("tail" if str(params.get("entry_mode", "tail")) == "tail" else "close")),
+            "basis": basis_label(params),
+            # 市场状态：让界面能看到"现在该不该玩这套规则"，以及为什么被拦下
+            "market": (ms or None),
+            "gated": gated,
             # 把这次实际用的条件一起带走：详情页要用同一套参数重算，
             # 否则会出现"名单里 75 分、点进去 0 分"的自相矛盾
             "params": dict(params),
@@ -263,71 +306,50 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
     }
 
 
+def basis_label(params: dict) -> str:
+    """这次名单是按什么口径算出来的：tail（尾盘定型）/ preview（没定型）/ close（收盘）。
+
+    entry_mode=tail 时不能一律标 tail：只要现在还没到 tail_from（默认 14:30），
+    用的就是"截至此刻"的均价线，名单还会变 —— 标成 tail 会让记忆页把一份
+    上午 10 点的半成品当成当天的正式名单存下来（这个坑已经踩过：
+    13:06 的记录 basis 写的是 tail，实际是盘中试算）。
+    """
+    if params.get("preview_at"):
+        return "preview"
+    if str(params.get("entry_mode", "tail")) != "tail":
+        return "close"
+    tf = str(params.get("tail_from", "14:30") or "")
+    if len(tf) != 5 or tf[2] != ":":
+        return "tail"                     # 'close' 之类，全天口径不用等
+    return "tail" if time.strftime("%H:%M") >= tf else "preview"
+
+
 _CHK_NAME = {"ma": "平均成本", "tail": "尾盘的那条平均成本线", "close_ma": "收盘价对平均成本",
              "chip": "套牢盘", "pos": "价格位置", "bottom": "底部横盘", "trend": "趋势"}
 _NOTE_KEYS = ("ma", "chip", "pos", "bottom", "trend")      # ma 已按 entry_mode 归并
 
 
 def _miss_note(a, params):
-    """人话版"还差什么"：不报条件代号，直接说差多远。"""
-    c, miss = a["checks"], []
-    av = a["avg"]
-    tail_mode = str(params.get("entry_mode", "tail")) == "tail"
-    if not c.get("ma"):
-        if tail_mode:
-            pv = av.get("preview") or {}
-            if pv:
-                if not pv.get("today_ok"):
-                    miss.append(f"今天的价还在平均成本下方 {abs(pv.get('surplus') or 0):.2f}%（{pv.get('at')}）")
-                else:
-                    miss.append(f"今天已站上，但前面只站上 {max(0, int(pv.get('hit') or 0) - 1)} 天")
-            else:
-                d = av.get("tail_detail") or []
-                bad = [x for x in d if not x.get("ok")]
-                if bad:
-                    miss.append(f"{bad[0]['date'][5:]} 那天收在平均成本下方 {abs(bad[0]['surplus']):.2f}%")
-                else:
-                    miss.append(f"站上平均成本的天数不够（{av.get('tail_streak', 0)} 天）")
-        else:
-            miss.append(f"连续站上平均成本的天数不够（{av.get('streak', 0)} 天）")
-    if not c.get("chip"):
-        cap = float(params.get("profit_cap", 0.25)) * 100
-        pr = (a["chip"].get("profit_ratio") or 0) * 100
-        miss.append(f"上方套牢盘 {pr:.0f}%，要 ≤ {cap:.0f}%")
-    if not c.get("pos"):
-        cap = float(params.get("pos_cap", 0.30)) * 100
-        miss.append(f"价格在区间 {a['pos'].get('pos', 0) * 100:.0f}% 位置，要 ≤ {cap:.0f}%")
-    if not c.get("bottom"):
-        b = a["bottom"] if isinstance(a.get("bottom"), dict) else {}
-        amp = b.get("amp")
-        miss.append(b.get("note") or
-                    ("走势还没收敛（振幅偏大或有明显斜度）" if amp is None
-                     else f"波动太大，近 20 日振幅 {amp * 100:.0f}%"))
-    if not c.get("trend"):
-        miss.append("低于 20 日均线")
-    return "、".join(miss)
+    """人话版"还差什么"：直接用策略给的 why，策略换了自己会说。"""
+    rows = a.get("gates") or []
+    miss = [g["why"] for g in rows if not g["ok"] and g.get("why")]
+    if miss:
+        return "、".join(miss)
+    # 策略没给说明时退回到老的写法，至少不至于空着
+    c = a["checks"]
+    out = []
+    for k, label in (("ma", "站上平均成本"), ("chip", "套牢盘少"),
+                     ("pos", "位置低"), ("bottom", "底部横盘"), ("trend", "趋势向上")):
+        if k in c and not c[k]:
+            out.append(f"{label}没达到")
+    return "、".join(out) or "差一点"
 
 
 def _apply_filters(results, params):
-    out = []
-    trend_on = params.get("ma_trend_enable", False)   # 和 config.DEFAULT_PARAMS 保持一致
-    bottom_on = params.get("bottom_enable", True)
-    amp_cap = float(params.get("bottom_amp", 0.40))
-    slope_cap = float(params.get("bottom_slope", 0.12))
-    for a in results:
-        c = a["checks"]
-        if not c["ma"] or not c["chip"] or not c["pos"]:
-            continue
-        if trend_on and not c["trend"]:
-            continue
-        if bottom_on:
-            b = a["bottom"]
-            if not b.get("ok") or b.get("amp") is None:
-                continue
-            if b["amp"] > amp_cap or abs(b.get("slope") or 0) > slope_cap:
-                continue
-        out.append(a)
-    return out
+    """按当前策略的关卡过滤。关卡表来自策略插件，实盘和回测共用同一份。"""
+    keys = [g.key for g in strats.get_current(params).gate_list(params)]
+    return [a for a in results
+            if all(a.get("checks", {}).get(k) for k in keys)]
 
 
 # ---------------------------------------------------------------- 宽松扫描（演示/监控）
@@ -356,7 +378,7 @@ def run_scan(params: dict, weights: dict, limit: int = 60, mode: str = "balanced
     # 股本也并发预热一遍：不预热的话每只股票在 analyze 里串行发一次请求
     if bool(params.get("real_turnover", True)):
         try:
-            ext.prefetch_shares(cand["code"].tolist(), workers=min(workers, 32))
+            ext.prefetch_shares(cand["code"].tolist(), workers=min(workers, 12))
         except Exception:
             pass
     with ThreadPoolExecutor(max_workers=workers) as ex:

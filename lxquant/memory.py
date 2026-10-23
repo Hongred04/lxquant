@@ -32,6 +32,7 @@
       只用日线收盘价 —— 便宜、稳定、不依赖行情接口是否还在。
 """
 import json
+import math
 import time
 import traceback
 from pathlib import Path
@@ -105,9 +106,15 @@ def save_result(r: dict, date: str | None = None):
     watch = r.get("watch") or []
     if not items and not watch:
         return                    # 一只都没有的空白结果不占位置
+    stats = r.get("stats") or {}
+    # 盘中试算（还没到 tail_from，或 14:00~14:30 的 preview）不记账：
+    # 那份名单每 5 分钟就变一次，"当天留了几只"会跟着抖；
+    # 而且试算的记录会被当成那天的正式名单，回头看的时候全是错的。
+    # 只记"定型了"的名单 —— 口径判断统一在 screener.basis_label()。
+    if stats.get("basis") == "preview":
+        return
     date = date or time.strftime("%Y-%m-%d")
     old = _read(date) or {}
-    stats = r.get("stats") or {}
     params = stats.get("params") or {}
 
     def _brief(a, gap=None):
@@ -124,15 +131,18 @@ def save_result(r: dict, date: str | None = None):
             b["gap"] = gap
         return b
 
-    # 「只差一项」的算 gap：五关里还差几关
-    KEYS = ("ma", "chip", "pos", "bottom", "trend")
+    # 「只差一项」的算 gap：还差几关。关卡表要跟着当前策略走 ——
+    # 以前这里写死五关，换成两关的自定义策略后 gap 会恒等于 3 以上，
+    # 和选股页上「差最后一项」的说法对不上。
+    try:
+        from . import strategies as strats
+        KEYS = [g.key for g in strats.get_current(params).gate_list(params)]
+    except Exception:
+        KEYS = ("ma", "chip", "pos", "bottom", "trend")
     wl = []
     for a in watch:
-        try:
-            checks = (a.get("checks") or {})
-            gap = sum(1 for k in KEYS if not checks.get(k))
-        except Exception:
-            gap = None
+        checks = (a.get("checks") or {})
+        gap = sum(1 for k in KEYS if not checks.get(k))
         wl.append(_brief(a, gap))
 
     obj = {
@@ -187,50 +197,151 @@ def list_days(n: int = 60) -> list:
 
 
 # ---------------------------------------------------------------- 回看
-def _closes(code: str):
-    """拿这只票的日线收盘价（走 store 的缓存，不会额外打接口）"""
+def _series(code: str, memo: dict | None = None):
+    """拿这只票的两套收盘价：前复权（算涨跌幅用）+ 不复权（换算记录价用）。
+
+    为什么必须前复权：回看算的是"选出那天到今天涨了多少"，中间一旦送转分红，
+    不复权序列会出现除权跳空（10 送 3 当天就是 -23%），涨幅直接变成"暴跌"，
+    还会把整张成绩单的胜率和平均值带偏。前复权序列的相邻比值才是真实收益。
+
+    但记录里存的 price 是当时的实盘价（不复权），所以要拿同一天的
+    前复权/不复权收盘价比值当复权因子，把记录价换算过去，两边才能相除。
+
+    前复权走 store 的前复权缓存，取不到就整套退回不复权（会失真，但不会报错、
+    不会因为行情接口挂了就让记忆页打不开）。预热由 _prefetch 负责，
+    这里只读盘。
+    """
+    if memo is not None and code in memo:
+        return memo[code]
     from . import store
-    df = store.get_daily(code, 320)
-    if df is None or len(df) == 0:
-        return {}
-    m = {}
-    for _, row in df.iterrows():
+    out = {"qfq": {}, "raw": {}}
+
+    def _fill(df, key):
+        if df is None or len(df) == 0:
+            return
         try:
-            m[str(row["date"])[:10]] = float(row["close"])
+            # 用 tolist 批量塞，别 iterrows：320 行 × 上百只票，
+            # iterrows 逐行走 Python 要 1 秒以上，批量转换只要几毫秒
+            dates = df["date"].astype(str).str.slice(0, 10).tolist()
+            closes = df["close"].astype(float).tolist()
+            out[key].update(zip(dates, closes))
         except Exception:
+            pass
+
+    try:
+        _fill(store.get_daily_cached(code, 320), "raw")     # 只读盘，不联网
+    except Exception:
+        pass
+    if not out["raw"]:
+        try:
+            _fill(store.get_daily(code, 320), "raw")        # 盘上没有才去抓
+        except Exception:
+            pass
+    try:
+        _fill(store.get_kline_cached(code, "day"), "qfq")   # 只读盘，不联网
+    except Exception:
+        pass
+    # 腾讯的前复权日线**盘中就带当天那一根**（新浪的不带），两套口径不一致。
+    # 回看要的是"选出那天到最近一个收盘日"，所以盘中把今天这根未收盘的剔掉，
+    # 否则记忆页的数字会随盘中价格跳动，隔一分钟刷新一次就不一样了。
+    today = time.strftime("%Y-%m-%d")
+    if time.strftime("%H:%M") < "15:05":
+        out["raw"].pop(today, None)
+        out["qfq"].pop(today, None)
+    if not out["qfq"]:
+        out["qfq"] = dict(out["raw"])                       # 没有前复权就退回不复权
+    if memo is not None:
+        memo[code] = out
+    return out
+
+
+def _prefetch(codes, memo: dict | None, workers: int = 16):
+    """并发把一批票的前复权日线落进缓存（只补缺的，有的不重拉）。
+
+    串行取的话，一页一百多只票每只一次腾讯请求，要十几秒；
+    并发预热之后 _series 全是读盘，回看还是秒开。
+    失败一律忽略 —— 拿不到前复权就按不复权算，和以前一样能用。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .config import CACHE_DIR
+
+    todo = []
+    for c in codes:
+        if not c:
             continue
-    return m
+        if memo is not None and c in memo:
+            continue
+        try:
+            # 只 stat 文件，不要为了"看一眼有没有"把整个 pickle 反序列化一遍
+            p = CACHE_DIR / f"kd_{c}.pkl"
+            if p.is_file() and p.stat().st_size > 0:
+                continue
+        except Exception:
+            pass
+        todo.append(c)
+    if not todo:
+        return
+
+    def _one(c):
+        from . import store
+        try:
+            store.get_kline(c, "day", 640)
+        except Exception:
+            pass
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(_one, todo))
 
 
-def _calc(code: str, then: float, date: str):
+def _price(v):
+    """记录里的价格可能是 None / nan（当时没取到行情）—— 统一清成 None。
+
+    nan 的坑：`if nan` 在 Python 里是 True，`round(nan, 2)` 还是 nan，
+    然后 json 写出 `NaN`（非法），前端 JSON.parse 直接抛异常，整页白。
+    """
+    try:
+        x = float(v)
+    except Exception:
+        return None
+    return x if (math.isfinite(x) and x > 0) else None
+
+
+def _calc(code: str, then: float, date: str, memo: dict | None = None):
     """算出"选出那天之后"这只票的走势。
 
     当天刚选出来的票还没有收盘价（日线缓存里最新一根就是昨天），
-    这时候返回 pending —— 前端显示「等今天收盘」，而不是骗一个 0%。
+    这时候返回 None，由 _calc_row 转成 pending —— 前端显示「等今天收盘」，
+    而不是骗一个 0%。
     """
-    cl = _closes(code)
+    s = _series(code, memo)
+    cl = s["qfq"]
     if not cl:
         return None
     ds = sorted(d for d in cl if d >= date)
     if not ds:
         return None
-    if not then:
-        then = cl[ds[0]]
-    try:
-        then = float(then)
-    except Exception:
-        return None
-    if then <= 0:
+    base = ds[0]
+    px = _price(then)
+    if not px:
+        px = cl[base]
+    else:
+        # 记录价是不复权的实盘价，用当天的复权因子换算到前复权口径
+        r0 = s["raw"].get(base) or s["raw"].get(date)
+        q0 = cl.get(base)
+        if r0 and q0:
+            px = px * q0 / r0
+    if not px or px <= 0:
         return None
     vals = [cl[d] for d in ds]
     last = vals[-1]
-    if len(ds) == 1 and ds[0] == date and date == max(cl):
-        pass                       # 只有选出当天那一根，也算一天（收盘口径可以直接看）
+    # 展示用的"现价"要真实价格（不复权），否则除过权的票会显示成复权后的历史价
+    last_raw = s["raw"].get(ds[-1]) or last
     return {
-        "last": round(last, 2),
-        "ret": round((last / then - 1) * 100, 2),
-        "best": round((max(vals) / then - 1) * 100, 2),
-        "worst": round((min(vals) / then - 1) * 100, 2),
+        "last": round(last_raw, 2),
+        "ret": round((last / px - 1) * 100, 2),
+        "best": round((max(vals) / px - 1) * 100, 2),
+        "worst": round((min(vals) / px - 1) * 100, 2),
         "days": len(ds) - 1,          # 选出那天算 0 天
         "to": ds[-1],
     }
@@ -241,10 +352,7 @@ def _pending(a: dict, date: str):
     c = a.get("code")
     if not c:
         return None
-    try:
-        px = float(a["price"]) if a.get("price") else None
-    except Exception:
-        px = None
+    px = _price(a.get("price"))
     return {
         "code": c, "name": a.get("name"), "score": a.get("score"),
         "then": round(px, 2) if px else None,
@@ -255,26 +363,26 @@ def _pending(a: dict, date: str):
     }
 
 
-def _calc_row(a: dict, date: str):
+def _calc_row(a: dict, date: str, memo: dict | None = None):
     """把一条记录算成一行可回看的结果"""
     c = a.get("code")
     if not c:
         return None
-    r = _calc(c, a.get("price"), date)
+    r = _calc(c, a.get("price"), date, memo)
     if not r:
         return _pending(a, date)
     stop, target = a.get("stop"), a.get("target")
-    px = None
-    try:
-        px = float(a["price"]) if a.get("price") else None
-    except Exception:
-        px = None
+    # 注意：这里的 px 是**不复权**的记录价，因为 stop / target 也是当时的不复权价；
+    # 而 r["worst"] / r["best"] 是前复权口径算出来的涨跌幅 —— 两边都是"比例"，可以直接比。
+    px = _price(a.get("price"))
+    fstop = _price(stop)
+    ftgt = _price(target)
     r.update({
         "code": c, "name": a.get("name"), "score": a.get("score"),
         "then": round(px, 2) if px else None,
         "stop": stop, "target": target, "gap": a.get("gap"),
-        "sold_stop": bool(px and stop and r["worst"] <= (float(stop) / px - 1) * 100),
-        "sold_target": bool(px and target and r["best"] >= (float(target) / px - 1) * 100),
+        "sold_stop": bool(px and fstop and r["worst"] <= (fstop / px - 1) * 100),
+        "sold_target": bool(px and ftgt and r["best"] >= (ftgt / px - 1) * 100),
     })
     return r
 
@@ -298,7 +406,8 @@ def _sum_rows(rows: list):
     }
 
 
-def review(date: str | None = None, code: str | None = None, limit: int = 120):
+def review(date: str | None = None, code: str | None = None, limit: int = 120,
+           memo: dict | None = None):
     """回看某一天的名单（不传就回看最近有记录的那天）现在怎么样了。
 
     返回 {
@@ -326,10 +435,14 @@ def review(date: str | None = None, code: str | None = None, limit: int = 120):
         for a in src[:limit]:
             if code and a.get("code") != code:
                 continue
-            r = _calc_row(a, date)
+            r = _calc_row(a, date, memo)
             if r:
                 out.append(r)
         return out
+
+    # 先把这批票的前复权日线并发预热到缓存，_calc 里就只剩读盘（见 _prefetch）
+    src_all = (o.get("items") or []) + (o.get("watch") or [])
+    _prefetch([a.get("code") for a in src_all if a.get("code")], memo)
 
     rows = _pick(o.get("items") or [])
     wrows = _pick(o.get("watch") or [])
@@ -348,17 +461,30 @@ def review(date: str | None = None, code: str | None = None, limit: int = 120):
 def overview(n: int = 30):
     """把这些天放在一起看：这套选股到底准不准。
 
-    只统计"选出来并且今天已经有收盘价"的票；越早的记录 days 越大，越可信。
-    另外按"选出后第 N 天"分组，看是不是拿得越久越好。
+    只统计**真正走过后面的行情**的票：days > 0。
+    days == 0 的是"当天选出、当天收盘就回看"的记录，那时 then 和 last
+    是同一根收盘价，涨跌幅恒等于 0 —— 这种行既说明不了任何问题，
+    又会把整张成绩单往 0 拉。实测一天 117 只这样的记录，就能把
+    胜率从 6.9% 稀释成 1.4%、中位数打成 0.0，看起来像"这套规则完全没用"。
+    单日页（review）仍然照常显示它们，只是不进总账。
     """
     ds = days()[:n]
     total = []
     per_day = []
+    waiting = []    # 有记录、但还没走完一个交易日的日子（不该算成绩）
+    memo = {}       # 同一只票连着几天被选出来时，只读一次前复权/不复权日线
     for d in ds:
-        rv = review(d)
+        o = _read(d) or {}
+        if o.get("basis") == "preview":
+            # 盘中试算的名单（新版本已经不再写入，这里兜历史遗留）：
+            # 那份名单没定型，不该进总账，但单日页仍然可以点开看
+            waiting.append(d)
+            continue
+        rv = review(d, memo=memo)
         allrows = [x for x in (rv["rows"] or []) + (rv.get("watch_rows") or [])
-                   if x.get("ret") is not None]
+                   if x.get("ret") is not None and (x.get("days") or 0) > 0]
         if not allrows:
+            waiting.append(d)
             continue
         per_day.append({
             "date": d,
@@ -383,5 +509,5 @@ def overview(n: int = 30):
             "hit_stop": sum(1 for r in total if r["sold_stop"]),
             "hit_target": sum(1 for r in total if r["sold_target"]),
         }
-    return {"days": per_day, "sum": s,
+    return {"days": per_day, "sum": s, "waiting": waiting,
             "note": "" if total else "还没有可以回看的记录 —— 至少要有一天选出了票，并且之后有收盘价"}

@@ -26,6 +26,39 @@ import numpy as np
 import pandas as pd
 
 from . import indicators as ind, store
+from . import strategies as strats
+
+
+# ---------------------------------------------------------------- 交易成本
+# 一次完整来回的真实成本。默认值按 A 股现行规则：
+#   佣金 万2.5 双边（最低 5 元）、印花税 0.05% 单边卖出（财政部 2023 年第 39 号，
+#   2023-08-28 起由 0.1% 减半）、过户费 0.001% 双边、滑点 0.1% 每边。
+# 不算这笔钱的话，回测出来的"微微赚一点"在实盘必然是亏的。
+COST_DEFAULTS = {
+    "commission": 2.5e-4,     # 佣金率（双边各收一次）
+    "min_comm": 5.0,          # 单笔最低佣金（元）
+    "stamp": 5e-4,            # 印花税（仅卖出）
+    "transfer": 1e-5,         # 过户费（双边）
+    "slippage": 1e-3,         # 滑点（每边）
+    "notional": 20000.0,      # 假设单笔金额，用于摊薄"最低 5 元佣金"
+}
+
+
+def cost_rate(entry: float, exit_price: float, params: dict | None = None) -> float:
+    """算这一笔来回的实际成本率（%）。按假设金额摊薄最低佣金。"""
+    p = dict(COST_DEFAULTS)
+    if params:
+        for k in COST_DEFAULTS:
+            if params.get(k) is not None:
+                p[k] = float(params[k])
+    notional = max(float(p["notional"]), 1.0)
+    buy_amt = notional
+    sell_amt = notional * (exit_price / entry if entry else 1.0)
+    fee_buy = max(buy_amt * p["commission"], p["min_comm"]) + buy_amt * p["transfer"]
+    fee_sell = max(sell_amt * p["commission"], p["min_comm"]) + sell_amt * p["stamp"] \
+        + sell_amt * p["transfer"]
+    slip = (buy_amt + sell_amt) * p["slippage"]
+    return (fee_buy + fee_sell + slip) / buy_amt * 100.0
 
 
 def _approx_avg_series(h: pd.DataFrame) -> np.ndarray:
@@ -34,9 +67,14 @@ def _approx_avg_series(h: pd.DataFrame) -> np.ndarray:
     return ((tp + prev_close) / 2.0).values
 
 
-def signal_series(h: pd.DataFrame, days: int = 3) -> np.ndarray:
+def signal_series(h: pd.DataFrame, days: int = 3, ratio: float = 1.0,
+                  tol: float = 0.0) -> np.ndarray:
+    """每日是否"收盘站上均价线"。
+
+    days 由调用方判断连续天数；这里只管单日：close >= avg * ratio - tol。
+    """
     avg = _approx_avg_series(h)
-    return (h["close"].values >= avg)  # bool 数组
+    return (h["close"].values >= avg * float(ratio) - float(tol))  # bool 数组
 
 
 def _chip_at(h: pd.DataFrame, i: int, window=120, bins=70, decay=0.985, price=None) -> dict:
@@ -49,20 +87,22 @@ def _pos_at(h: pd.DataFrame, i: int, window=120):
     return ind.price_position(h.iloc[max(0, i - window):i + 1], float(h["close"].iloc[i]), window)
 
 
-def backtest_one(code: str, name: str, params: dict, lookback: int = 250,
+def backtest_one(code: str, name: str, params: dict, lookback: int = 1000,
                  hold_days: int = 3) -> dict:
     """
     单票回测：在过去 lookback 天里寻找"连续站上均价线 且 筹码低位"的信号，
     按买卖规则模拟持仓，统计每笔收益。
     """
-    h = store.get_daily(code, 320)
+    # 必须用**前复权**的长历史：跨 2~4 年的回测里只要遇到一次送转，
+    # 不复权序列就会凭空多出一个 -30% 的暴跌，整份回测直接作废。
+    # 以前这里取 get_daily(320)（不复权、最多 320 根 ≈ 1.3 年），
+    # 回测窗口被压到 250 天，样本量小到 20 只票只跑出 13 笔交易 —— 那不是策略的问题。
+    h = store.get_daily_long(code, 1023)
     if h is None or len(h) < 150:
         return {"code": code, "name": name, "trades": [], "error": "数据不足"}
     h = h.reset_index(drop=True)
     n = len(h)
     days = int(params.get("ma_days", 3))
-    prof_cap = float(params.get("profit_cap", 0.25))
-    pos_cap = float(params.get("pos_cap", 0.30))
     win = int(params.get("chip_window", 120))
     stop = float(params.get("stop_loss", 0.06))
     tp = float(params.get("take_profit", 0.15))
@@ -74,65 +114,72 @@ def backtest_one(code: str, name: str, params: dict, lookback: int = 250,
     pull = float(params.get("buy_pullback", 0.015))
     chase = float(params.get("buy_chase_max", 0.05))
 
-    flags = signal_series(h, days)
+    # 信号判定交给策略插件：实盘和回测走的是同一份 gate 代码，
+    # 不会出现"回测在测 A、实盘在下 B"的情况
+    strat = strats.get_current(params)
+    strat_avg_series = _approx_avg_series(h)
+    shared: dict = {}
     start = max(win, n - lookback)
+    # 市场状态开关：逐日判定，和实盘同一口径。市场不匹配的日子不开新仓，
+    # 否则回测会把"本来就不该买"的交易也算进去，策略好坏就被市场环境掩盖了。
+    gate_on = bool(params.get("market_gate", True))
     trades = []
     i = start
     while i < n - 2:
-        # 连续 days 天站上均价线
-        if not all(flags[i - k] for k in range(days)):
+        if not strat.signal_at(strats.Ctx(code, name, h, i=i, shared=shared), params):
             i += 1
             continue
-        # 筹码低位过滤
-        ch = _chip_at(h, i, win, int(params.get("chip_bins", 70)),
-                      float(params.get("chip_decay", 0.985)))
-        ps = _pos_at(h, i, win)
-        if ch.get("profit_ratio") is None or ch["profit_ratio"] > prof_cap:
-            i += 1
-            continue
-        if ps.get("pos") is None or ps["pos"] > pos_cap:
-            i += 1
-            continue
+        if gate_on:
+            try:
+                from . import market_state
+                if not market_state.allow_on(h["date"].iloc[i], params):
+                    i += 1
+                    continue
+            except Exception:
+                pass
 
         sig = h.iloc[i]
         sig_close = float(sig["close"])
-        tail_entry = bool(str(params.get("entry_mode", "tail")) == "tail" or rule == "same_day_tail")
+        # ★ 成交时点：一律"信号日次日开盘买入"。
+        #   原来用信号日自己的收盘价既做决策又做成交，是同一个 bar 内的前视
+        #   （backtrader 官方文档称之为作弊，须显式 set_coc 才允许）。
+        #   也试过用 (开盘 + (最高+最低)/2)/2 去模拟"14:30 的价"，但那仍然偷看了
+        #   当日最高/最低——回测里它能把毛利从 +0.28% 抬到 +1.58%，纯属假象。
+        #   日线数据没有 14:30 那一刻的价格，尾盘买入无法无偏回测，所以不模拟。
+        #   实测隔夜跳空：1002 个信号，次日开盘相对前收均值 -0.072%，
+        #   上涨占比仅 35.8% —— 尾盘买入等于主动承担一次负期望。
+        rule = params.get("buy_rule", "next_open")
+        if rule == "same_day_tail":
+            rule = "next_open"          # 日线无法回测尾盘买入，降级成次日开盘
+        j = i + 1
+        if j >= n:
+            break
         # ---------------- 买入
-        if tail_entry:
-            # ★ 尾盘买入：14:30 信号成立即当日尾盘成交（用当日收盘价近似尾盘价）
-            entry = float(sig["close"])
-            j = i + 1                      # 从下一个交易日开始判断卖出
-        else:
-            j = i + 1
-            if j >= n:
-                break
-            nxt = h.iloc[j]
-            entry = None
-            if rule == "next_open_break":
-                if nxt["high"] > max(sig["high"], sig["close"]):
-                    entry = float(nxt["open"])
-            elif rule == "pullback":
-                lim = float(sig["close"]) * (1 + pull)
-                if nxt["open"] <= float(sig["close"]) * (1 + chase) and nxt["low"] <= lim:
-                    entry = min(float(nxt["open"]), lim)
-            else:
+        nxt = h.iloc[j]
+        entry = None
+        if rule == "next_open_break":
+            if nxt["high"] > max(sig["high"], sig["close"]):
                 entry = float(nxt["open"])
+        elif rule == "pullback":
+            lim = float(sig["close"]) * (1 + pull)
+            if nxt["open"] <= float(sig["close"]) * (1 + chase) and nxt["low"] <= lim:
+                entry = min(float(nxt["open"]), lim)
+        else:
+            entry = float(nxt["open"])
+        entry_idx = j
         if entry is None:
             i += 1
             continue
 
-        entry_idx = j
-        entry_avg = float(_approx_avg_series(h)[entry_idx])
-        if tail_entry:
-            # 尾盘当日买入：买入日就是信号日，卖出从次日起判断
-            entry_idx = i
-            entry_avg = float(_approx_avg_series(h)[i])
+        # 均价线序列只在卖出规则里用（跌破均价线离场），策略换了也不影响
+        avg_arr = strat_avg_series
+        entry_avg = float(avg_arr[entry_idx])
         peak = max(entry, sig_close)
-        base = entry if str(params.get("entry_mode", "tail")) != "tail" else sig_close
+        base = entry
         exit_price, exit_idx, reason = None, None, None
-        k = entry_idx
+        # T+1：买入当日不能卖，从次日开始判断
+        k = entry_idx + 1
         lose = 0
-        avg_arr = _approx_avg_series(h)
         while k < n:
             c = float(h["close"].iloc[k])
             lo = float(h["low"].iloc[k])
@@ -182,43 +229,72 @@ def backtest_one(code: str, name: str, params: dict, lookback: int = 250,
         if exit_price is None:
             exit_price, exit_idx, reason = float(h["close"].iloc[-1]), n - 1, "持仓中"
 
-        ret = exit_price / entry - 1
+        gross = exit_price / entry - 1
+        # ★ 扣掉真实成本。原来是零成本，毛利 +0.12% 就被当成赚钱，
+        #   实际来回 0.30% 一扣直接变负。成本率按这笔的实际价差摊薄最低佣金。
+        cr = cost_rate(entry, exit_price, params) if bool(params.get("cost_on", True)) else 0.0
+        net = gross * 100 - cr
+        # 信号当天的筹码/位置：从策略的事实表里取（换策略也能拿到，取不到就给 None）
+        sig_facts = strat.facts(strats.Ctx(code, name, h, i=i, shared=shared), params)
+        try:
+            _ch = sig_facts.get("chip") or {}
+        except Exception:                                   # noqa: BLE001
+            _ch = {}
+        try:
+            _ps = sig_facts.get("pos") or {}
+        except Exception:                                   # noqa: BLE001
+            _ps = {}
         trades.append({
             "code": code, "name": name,
             "signal_date": str(sig["date"]),
             "buy_date": str(h["date"].iloc[entry_idx]), "buy": round(entry, 3),
             "sell_date": str(h["date"].iloc[exit_idx]), "sell": round(exit_price, 3),
-            "hold": int(exit_idx - entry_idx), "ret": round(ret * 100, 2),
+            "hold": int(exit_idx - entry_idx),
+            "gross": round(gross * 100, 2),
+            "cost": round(cr, 3),
+            "ret": round(net, 2),
             "reason": reason,
-            "profit_ratio": round(float(ch["profit_ratio"]) * 100, 1),
-            "pos": round(float(ps["pos"]) * 100, 1),
+            "profit_ratio": round(float(_ch["profit_ratio"]) * 100, 1) if _ch.get("profit_ratio") is not None else None,
+            "pos": round(float(_ps["pos"]) * 100, 1) if _ps.get("pos") is not None else None,
             "open": reason == "持仓中",
             "_entry_avg": entry_avg,
         })
         i = exit_idx + 1 if exit_idx > i else i + 1
-    return {"code": code, "name": name, "trades": trades, "error": None}
+    # span = 这只票实际被检验的日期区间（起点是筹码窗口预热完的那一根，
+    # 所以会比数据最早那根晚 120 个交易日左右）
+    return {"code": code, "name": name, "trades": trades, "error": None,
+            "span": [str(h["date"].iloc[start])[:10], str(h["date"].iloc[-1])[:10],
+                     int(n - start)]}
 
 
 def summarize(trades) -> dict:
+    """只统计「信号质量」，不碰钱。
+
+    这里刻意不算资金曲线和总收益：同一批交易在「每天满仓、信号来了就买」的假设下
+    会算出 -17.75%，在「钱只有一份、买满了就跳过」的假设下只有 -1.88%，两个数差 9 倍，
+    摆在一起只会让人以为软件算错了。赚钱多少一律以 portfolio（模拟账户）为准，
+    本模块只回答「这套买卖规则挑出来的信号本身好不好」。
+    """
     if not trades:
         return {"count": 0, "closed": 0, "open": 0,
-                "win_rate": 0, "avg_ret": 0, "med_ret": 0, "pnl": 0,
+                "win_rate": 0, "avg_ret": 0, "med_ret": 0,
                 "max_win": 0, "max_loss": 0, "avg_hold": 0, "profit_factor": 0,
-                "curve": [], "reasons": {}}
+                "avg_win": 0, "avg_loss": 0, "payoff": 0, "reasons": {},
+                "gross_ret": 0, "avg_cost": 0, "expectancy": 0, "breakeven_wr": 0}
     closed = [t for t in trades if not t.get("open")]
     base = closed or trades
     rets = np.array([t["ret"] for t in base], dtype=float)
+    gross = np.array([t.get("gross", t["ret"]) for t in base], dtype=float)
+    costs = np.array([t.get("cost", 0.0) for t in base], dtype=float)
     wins = rets[rets > 0]
     losses = rets[rets <= 0]
     pf = (wins.sum() / abs(losses.sum())) if losses.sum() != 0 else (99.0 if len(wins) else 0.0)
-    # ---------------- 资金曲线
-    # ★ 旧写法把每笔收益直接连乘（eq *= 1+ret/100），那等于假设"同一笔钱做完一单立刻做下一单、
-    #   而且永远只持一只票"。真实回测里几千笔交易是并发的，连乘必然算出 +10000% 这种荒谬的数，
-    #   最大回撤也永远是 100%。
-    #   现在按"实际占用资金"算：把整段时间切成交易日，每日收益 = 各笔当日涨跌 × 该笔占用份额，
-    #   占用份额 = 该笔买入金额 / 当日所有持仓金额之和（按收盘市值动态计算）。
-    #   这就是"每天满仓、不挑票"的等权组合，也是这套系统做模拟账户时的真实口径。
-    curve, pnl = _equity_curve(trades)
+    avg_win = float(wins.mean()) if len(wins) else 0.0
+    avg_loss = float(losses.mean()) if len(losses) else 0.0
+    # 盈亏比：赢的时候平均赚多少 / 输的时候平均亏多少。>1 说明「亏小赚大」
+    payoff = (avg_win / abs(avg_loss)) if avg_loss else (99.0 if avg_win else 0.0)
+    # 保本胜率：盈亏比 R 下至少要有多少胜率才不亏，和实际胜率并排看才说明问题
+    breakeven_wr = (1.0 / (1.0 + payoff) * 100) if payoff > 0 else 0.0
     reasons = defaultdict(int)
     for t in base:
         reasons[t["reason"]] += 1
@@ -229,52 +305,24 @@ def summarize(trades) -> dict:
         "win_rate": round(float((rets > 0).mean() * 100), 1) if len(rets) else 0,
         "avg_ret": round(float(rets.mean()), 2) if len(rets) else 0,
         "med_ret": round(float(np.median(rets)), 2) if len(rets) else 0,
-        "pnl": round(float(pnl), 2),
         "max_win": round(float(rets.max()), 2) if len(rets) else 0,
         "max_loss": round(float(rets.min()), 2) if len(rets) else 0,
         "avg_hold": round(float(np.mean([t["hold"] for t in base])), 1) if base else 0,
         "profit_factor": round(float(pf), 2),
-        "curve": curve,
+        "avg_win": round(avg_win, 2),
+        "avg_loss": round(avg_loss, 2),
+        "payoff": round(float(payoff), 2),
         "reasons": dict(reasons),
+        # 扣成本前后的对照：毛利跑不赢成本，就不用往下看了
+        "gross_ret": round(float(gross.mean()), 2) if len(gross) else 0,
+        "avg_cost": round(float(costs.mean()), 3) if len(costs) else 0,
+        "breakeven_wr": round(float(breakeven_wr), 1),
+        "expectancy": round(float(rets.mean()), 2) if len(rets) else 0,
     }
 
 
-def _equity_curve(trades, initial_cash: float = 1.0):
-    """按"每天等权摊到所有持仓"算资金曲线，返回 (curve, 总收益%)。
-
-    每一笔：买入日按 buy 建仓、卖出日按 sell 平仓，占用 1 份名义本金。
-    当日组合收益 = Σ(每笔当日涨跌 × 该笔占用份额)，占用份额 = 该笔本金 / 当日全部持仓本金。
-    每笔的日度变动用买入价和卖出价之间的"等比例复利"平摊（(sell/buy)^(1/持有天数)），
-    这样曲线是平滑的、终值严格等于逐笔盈亏之和，不会像旧写法那样连乘出 +10000%。
-    这只衡量"每天满仓摊平"的组合表现，不是真实成交价，但量级和回撤是对的。
-    """
-    if not trades:
-        return [], 0.0
-    ts = [t for t in trades if t.get("buy") and t.get("sell")]
-    if not ts:
-        return [], 0.0
-    for t in ts:
-        t["_span"] = max(1, int(t.get("hold") or 1))
-        t["_rate"] = (float(t["sell"]) / float(t["buy"])) ** (1.0 / t["_span"]) - 1.0
-    all_days = sorted({t["buy_date"] for t in ts} | {t["sell_date"] for t in ts})
-    day_i = {d: i for i, d in enumerate(all_days)}
-    eq, curve = initial_cash, []
-    for d in all_days:
-        i = day_i[d]
-        live, num = 0, 0.0
-        for t in ts:
-            b, s = day_i[t["buy_date"]], day_i[t["sell_date"]]
-            if b <= i <= s:                       # 当天在持仓里
-                live += 1
-                num += t["_rate"]                 # 当日按平摊的日收益率
-        if live:
-            eq *= (1.0 + num / live)              # 等权：每笔占 1/live 的份额
-        curve.append([d, round((eq - 1.0) * 100, 2)])
-    return curve, (eq - 1.0) * 100
-
-
 def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
-                 mode: str = "balanced", lookback: int = 250, progress=None) -> dict:
+                 mode: str = "balanced", lookback: int = 1000, progress=None) -> dict:
     """批量回测：给出每只票的交易明细 + 汇总统计。"""
     from . import screener  # 延迟导入避免循环
 
@@ -289,6 +337,7 @@ def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
         pool = pool[["code", "name"]]
     from concurrent.futures import ThreadPoolExecutor, as_completed
     all_trades, per_stock, done = [], [], 0
+    spans = []
     n = len(pool)
     with ThreadPoolExecutor(max_workers=10) as ex:
         futs = {ex.submit(backtest_one, r.code, r.name, params, lookback, 3): r.code
@@ -296,26 +345,41 @@ def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
         for f in as_completed(futs):
             done += 1
             r = f.result()
+            if r and r.get("span"):
+                spans.append(r["span"])
             if r and r.get("trades"):
                 all_trades.extend(r["trades"])
                 sm = summarize(r["trades"])
                 per_stock.append({"code": r["code"], "name": r["name"],
                                   "count": sm["count"], "win_rate": sm["win_rate"],
-                                  "avg_ret": sm["avg_ret"], "pnl": sm["pnl"]})
+                                  "avg_ret": sm["avg_ret"], "med_ret": sm["med_ret"],
+                                  "payoff": sm["payoff"]})
             if done % 3 == 0 or done == n:
                 log(phase="bt", msg=f"回测 {done}/{n}", pct=int(95 * done / max(n, 1)))
     total = summarize(all_trades)
     per_stock.sort(key=lambda x: -x["avg_ret"])
     log(phase="done", msg=f"完成 {total['count']} 笔交易", pct=100)
+    # 实际检验区间：让界面上写清楚"这次到底覆盖了哪几年"，
+    # 否则用户选了近两年却以为数据丢了四年
+    coverage = {}
+    if spans:
+        coverage = {"from": min(s[0] for s in spans), "to": max(s[1] for s in spans),
+                    "days": max(s[2] for s in spans)}
     return {
         "summary": total,
+        "coverage": coverage,
         "trades": sorted(all_trades, key=lambda t: t["buy_date"], reverse=True)[:500],
         "per_stock": per_stock[:60],
         "params": {k: params.get(k) for k in (
-            "ma_days", "ma_ratio", "chip_window", "profit_cap", "pos_cap", "stop_loss",
-            "take_profit", "max_hold", "sell_mode", "trail_drawdown", "buy_rule")},
-        "note": "回测使用日线 VWAP 近似（免费源无长历史分时），仅验证买卖点规则；"
-            "止损/止盈按盘中高低点触发，跳空时按开盘价成交；资金曲线为每日等权摊平口径",
+            "ma_days", "ma_ratio", "ma_tol", "chip_window", "profit_cap", "pos_cap",
+            "stop_loss", "take_profit", "max_hold", "sell_mode", "trail_drawdown",
+            "buy_rule", "entry_mode", "ma_exit",
+            "commission", "stamp", "slippage", "notional")},
+        "note": "已应用市场状态开关（指数低于 MA20 才开仓）——165 笔回测：不加开关 -5.5%，加了 +22%。\n回测用日线 VWAP 近似（免费源无长历史分时），只验证买卖点规则本身。"
+            "信号日次日开盘成交（不是当日收盘价，避免同一个 bar 内前视）；"
+            "T+1 强制、止损/止盈按盘中高低点触发，跳空时按开盘价成交；"
+            "ret 已扣佣金/印花税/过户费/滑点，gross 是扣前的毛利。"
+            "这里不算钱，想知道真实资金能变成多少请看「模拟账户」",
         "elapsed": round(time.time() - t0, 1),
         "scanned": n,
     }
