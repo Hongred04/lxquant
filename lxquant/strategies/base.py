@@ -129,11 +129,26 @@ class Strategy:
         return {}
 
     # ---- 通用 ----
+    def params(self, p: dict) -> dict:
+        """把本策略的 defaults 合并进参数（只填缺失/为 None 的项）。
+
+        这一步原本应该在加载策略时自动做掉（见 __init__.py 里的说明），
+        但实际没实现 —— 结果是策略里写的 defaults 完全不生效，
+        Gate(enable_key=...) 那种开关也因为 p 里没这个键而永远取默认值 True。
+        统一在这里合并，check_all / signal_at 走同一条路径。
+        """
+        out = dict(self.defaults or {})
+        for k, v in (p or {}).items():
+            if v is not None:
+                out[k] = v
+        return out
+
     def gate_list(self, p: dict) -> list:
-        return [g for g in self.gates if g.active(p)]
+        return [g for g in self.gates if g.active(self.params(p))]
 
     def check_all(self, f: Facts, ctx: Ctx, p: dict) -> tuple:
         """跑一遍所有关卡，返回 (checks 字典, 给界面用的关卡明细)。"""
+        p = self.params(p)
         checks, rows = {}, []
         for g in sorted(self.gate_list(p), key=lambda x: x.cost):
             r = g.eval(f, ctx, p)
@@ -146,6 +161,7 @@ class Strategy:
 
     def signal_at(self, ctx: Ctx, p: dict) -> bool:
         """回测用：这一天所有关卡是否都过。短路求值，贵的关卡排在后面。"""
+        p = self.params(p)
         f = self.facts(ctx, p)
         for g in sorted(self.gate_list(p), key=lambda x: x.cost):
             if not g.eval(f, ctx, p)["ok"]:

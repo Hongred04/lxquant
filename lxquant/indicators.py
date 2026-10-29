@@ -17,7 +17,8 @@ import pandas as pd
 
 
 # ================================================================ 分时均价线
-def daily_avg_price(k5: pd.DataFrame, tail_from: str = "14:30") -> pd.DataFrame:
+def daily_avg_price(k5: pd.DataFrame, tail_from: str = "14:30",
+                    with_minutes: bool = True) -> pd.DataFrame:
     """
     从分钟 K 线聚合出每日数据，并计算当日分时均价线。
 
@@ -116,6 +117,10 @@ def daily_avg_price(k5: pd.DataFrame, tail_from: str = "14:30") -> pd.DataFrame:
     # 一天有几十个分钟点，绝不能 merge 进主表 —— 那样 tail_window_stats /
     # consecutive_above 按行 tail(n) 会取到同一天的几十根，判定全错。
     # 所以单独挂在 attrs 上，主表永远保持一天一行。
+    if not with_minutes:
+        # 逐分钟明细只有「14:00 提前试算」用得到。平时每只票都构造一份
+        # （factorize + 400 次字符串格式化 + 一个 DataFrame），纯属白烧 CPU。
+        return out
     min_key = gcode.astype(np.int64) * 10000 + hhmm.astype(np.int64)
     mcode, mkey = pd.factorize(min_key, sort=True)
     ml = np.full(len(mkey), -1, dtype=np.int64)

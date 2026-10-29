@@ -208,15 +208,11 @@ const TITLES = { screen: '选股', watch: '盯盘 / 自选', memory: '记忆', b
        顶部只留一条面包屑 + 吸顶的工具条，别让人迷失在长表格里 */
 const LEVEL = { screen: 0, watch: 0, memory: 1, backtest: 1, portfolio: 1, method: 1, settings: 1 };
 const REHOME = Object.keys(LEVEL).filter(v => LEVEL[v] === 0);   // 操作台：用 app-main 把二级页的头部还回去
-const HINTS = {
-  screen: '软件自己会选，你回来直接看名单就行',
-  watch: '自选股在这里盯着，买点卖点会自己弹出来；下面这份是全市场谁有资金在托价',
-  memory: '每天选完自动记一笔。隔几天回来看：那天选的票，后来涨了还是跌了',
-  backtest: '拿过去的数据把买卖规则跑一遍，看这套打法历史上是什么成绩',
-  portfolio: '像真实账户一样算：钱只有一份，买满了就买不进，还要扣手续费和滑点',
-  method: '五个条件、怎么买卖、数据从哪来',
-  settings: '所有门槛都能改，保存后下一次自动选股就按新的来',
-};
+// 顶栏副标题：默认留空。以前每页都挂一句「这页是干什么的」，
+// 但页面标题（选股 / 自选 / 记忆 / 信号检验…）本身已经说清了，
+// 再补一句等于让每个页面都先念一遍说明书。留空后由状态信息按需填充
+// （扫描中、上次更新时间等），只有在真有动态内容时才出现。
+const HINTS = {};
 
 /* 页面头 = 顶栏（标题 / 面包屑 / 本页工具条）这一整块 .hd。每个页面在自己的 .view 里都留了个空的
    <header class="topbar"> 占着"家"的位置；这里把真正的 #topbar 放进当前页面的那个坑里，
@@ -619,7 +615,7 @@ function renderMkt(r) {
   const ms = (r && r.stats && r.stats.market) || null;
   const gated = !!(r && r.stats && r.stats.gated);
   if (!ms || !ms.date) { el.hidden = true; return; }
-  const tag = ms.mode === 'weak' ? '适合超跌反转'
+  const tag = ms.mode === 'weak' ? '超跌主场'
     : (ms.mode === 'strong' ? '不适合这套规则' : '临界，建议观望');
   el.hidden = false;
   el.className = 'mktbar ' + (ms.mode || 'mid') + (gated ? ' gated' : '');
@@ -627,7 +623,10 @@ function renderMkt(r) {
     + `<b>市场状态 ${esc(ms.date)}</b>大盘相对 20 日均线 <b>${fmt(ms.vs20, 2)}%</b>`
     + `（60 日 ${fmt(ms.vs60, 2)}% · 20 日涨跌 ${fmt(ms.ret20, 2)}% · 量能比 ${fmt(ms.volr, 2)}）`
     + `<br>${esc(ms.note || '')}`
-    + (gated ? `<br><b style="color:var(--up)">已暂停买入：</b>这批本来会选中的票放进观察池了，等大盘真弱再动手。`
+    + (gated ? `<br><b style="color:var(--up)">已暂停买入：</b>`
+      + ((r.stats.gated_n || 0) > 0
+        ? `这 ${r.stats.gated_n} 只本来会选中的票放进观察池了，等大盘真弱再动手。`
+        : `今天本来也没有全达标的票，跟市场状态无关。`)
       + `（参数里关掉「市场状态开关」可以不看这个）` : '');
 }
 
@@ -718,11 +717,14 @@ function autoText(st) {
   const today = st.now ? String(st.now).slice(0, 10) : '';
   const ranToday = st.last_run && (!today || String(st.last_run).slice(0, 10) === today);
   let s;
-  if (ranToday) {
-    const rs = String(st.last_reason || '').replace(/（.*?）/g, '').trim();
-    s = `上次 ${fmtHm(st.last_run)}${rs ? ' ' + rs.slice(0, 24) : ''}`;
+  if (ranToday && st.last_run) {
+    // reason 常是「开盘首扫 · 扫了 600 只，选出 1 只」这种长串，只留第一段。
+    // 具体扫了多少只下面状态栏还有，这里重复一遍会把顶栏撑爆（实测溢出 54px）。
+    const head = String(st.last_reason || '')
+      .replace(/（.*?）/g, '').split('·')[0].trim().slice(0, 12);
+    s = `上次 ${fmtHm(st.last_run)}${head ? ' ' + head : ''}`;
   } else {
-    s = '今天还没扫过，马上开始';
+    s = '今天还没扫过';
   }
   if (st.next_run) s += ` · 下次 ${fmtHm(st.next_run)}`;
   // 上次自动跑挂了，把原因直接说给用户听，别让人以为名单是新的
@@ -1052,7 +1054,9 @@ async function runScan() {
     if (r.state !== 'done') throw new Error(r.error || '没跑完');
     S.scanItems = r.result.items || [];
     renderScan();
-    toast('看完了');
+    // 盯盘扫描是诊断工具，不拦人；但大盘不配合时得提一句，否则这些票会被当成买点
+    const sst = (r.result && r.result.stats) || {};
+    toast(sst.gated ? '看完了 —— 大盘不配合，这些票先别急着买' : '看完了');
   } catch (e) { toast('没能看一眼：' + e.message, true); }
   finally {
     S.busy.scan = false;
@@ -1280,7 +1284,7 @@ function toggleSound() {
 const MEM = {
   days: [],          // [{date, at, hit, watch, scanned, names}]
   date: '',          // 当前看的那天
-  src: 'all',        // all / hit / watch
+  src: 'hit',        // all / hit / watch —— 默认只看能买，值得买不进统计口径
   rv: null,          // 那天的回看结果
   ov: null,          // 三十天的总成绩
   loading: false,
@@ -1314,12 +1318,19 @@ async function loadMemory(force) {
   } finally {
     MEM.loading = false;
   }
-  renderMemDates();
   if (!MEM.days.length) {
     renderMemEmpty('还没有能回看的记录');
     return;
   }
-  if (!MEM.date || !MEM.days.some(x => x.date === MEM.date)) MEM.date = MEM.days[0].date;
+  if (!MEM.date || !MEM.days.some(x => x.date === MEM.date)) {
+    // 优先落在「最近一个真选出过票」的那天。0 只的日子点进去 KPI 全是「—」、
+    // 表格只有一行「没有票」，看起来像功能坏了 —— 其实只是那天没信号。
+    const pick = MEM.days.find(x => (x.hit || 0) > 0) || MEM.days[0];
+    if (pick) MEM.date = pick.date;
+  }
+  // ★ 先把日期定下来再渲染选择器：反过来的话选择器显示的是「最新那天」，
+  //   而下面加载的内容已经跳到「最近有票的那天」，两者对不上。
+  renderMemDates();
   await loadMemDay(MEM.date);
 }
 
@@ -1415,7 +1426,23 @@ function renderMemory() {
   // ---- 明细表
   const btxt = memBasisText(rv.basis);
   $('#mem-meta').textContent = `${MEM.date} 选的 · ${items.length} 只${btxt ? ' · ' + btxt : ''}`;
-  $('#mem-sub').textContent = `涨跌幅按前复权算（送转分红不算成暴跌）；最高/最低是选出后的区间极值`;
+  // 说清买入价是怎么来的：这是回看涨跌幅的起点，差 0.5% 结论就会偏。
+  // 但那天一只票都没选出时（只有观察名单），根本没有「买入价」可言，
+  // 再挂一句「旧记录/快照价」会让人误以为数据有问题。
+  const pa = (rv && rv.price_at) || '';
+  const atHm = String((rv && rv.at) || '').slice(11, 16);
+  let paTxt = '';
+  if (n > 0 || items.length) {
+    if (pa) {
+      paTxt = `买入价取自当天 ${pa} 的分时（你实际下单那个时点，不是收盘价）`;
+    } else if (atHm && atHm >= '15:00') {
+      paTxt = '买入价用的是当天收盘价（不是 14:45 的价，看涨跌幅要打个折扣）';
+    } else {
+      paTxt = '买入价用的是当时的盘中快照（没记录 14:45 的分时）';
+    }
+    paTxt += ' · ';
+  }
+  $('#mem-sub').textContent = `${paTxt}涨跌幅按前复权算（送转分红不算成暴跌）；最高/最低是选出后的区间极值`;
   const TB = $('#tb-mem');
   TB.innerHTML = items.map(x => {
     const kind = memKindOf(x);
@@ -1439,21 +1466,33 @@ function renderMemory() {
   const TB2 = $('#tb-memdays');
   const waitDays = (ov && ov.waiting) || [];
   const waitTip = waitDays.length
-    ? `<tr class="empty"><td colspan="6">${waitDays.map(esc).join('、')} 还没走完一个交易日（或只是盘中试算），等明天起才有成绩，不进统计</td></tr>`
+    ? `<tr class="empty"><td colspan="8">${waitDays.map(esc).join('、')} 还没走完一个交易日（或只是盘中试算），等明天起才有成绩，不进统计</td></tr>`
     : '';
+  // 能买 / 值得买 分开显示；某天没有某一组时给「—」，不要补 0（0 会被读成"涨了 0%"）
+  const sgn = v => (v == null ? '—' : (v > 0 ? '+' : '') + fmt(v, 2) + '%');
+  const wr = v => (v == null ? '—' : pct(v, 0));
+  const cls = v => (v == null ? '' : (v > 0 ? 'up' : (v < 0 ? 'down' : '')));
   if (ov && (ov.days || []).length) {
-    TB2.innerHTML = ov.days.map(d => `<tr data-date="${d.date}">
+    TB2.innerHTML = ov.days.map(d => {
+      // 当天记的总只数（含还没走完一天的）；老记录没有 total 字段时用 n/hit 取大者兜底，
+      // 免得又出现「记了 101、其中能买 117」这种自相矛盾的行
+      const tot = d.total != null ? d.total : Math.max(d.n || 0, d.hit || 0);
+      const hn = d.hit_n != null ? d.hit_n : d.hit;
+      return `<tr data-date="${d.date}">
       <td>${d.date}</td>
-      <td class="num">${d.n}</td>
-      <td class="num">${d.hit}</td>
-      <td class="num ${d.avg > 0 ? 'up' : (d.avg < 0 ? 'down' : '')}">${d.avg > 0 ? '+' : ''}${fmt(d.avg, 2)}%</td>
-      <td class="num">${pct(d.win_rate, 0)}</td>
+      <td class="num" title="当天共记 ${tot} 只，其中 ${d.n} 只已走过至少一个交易日，参与下面的涨跌统计">${tot}</td>
+      <td class="num" title="当天全部达标的票">${hn}</td>
+      <td class="num ${cls(d.hit_avg)}">${sgn(d.hit_avg)}</td>
+      <td class="num">${wr(d.hit_win)}</td>
+      <td class="num ${cls(d.watch_avg)}" title="差一两关的观察票，只作参考、不计入总胜率">${sgn(d.watch_avg)}</td>
+      <td class="num">${wr(d.watch_win)}</td>
       <td class="num">${d.days}</td>
-    </tr>`).join('') + waitTip;
+    </tr>`;
+    }).join('') + waitTip;
   } else {
     TB2.innerHTML = (waitDays.length
-      ? `<tr class="empty"><td colspan="6">${waitDays.map(esc).join('、')} 还没走完一个交易日（或只是盘中试算），明天起就会有成绩</td></tr>`
-      : '<tr class="empty"><td colspan="6">还没有足够的记录 —— 明天起就会有</td></tr>');
+      ? `<tr class="empty"><td colspan="8">${waitDays.map(esc).join('、')} 还没走完一个交易日（或只是盘中试算），明天起就会有成绩</td></tr>`
+      : '<tr class="empty"><td colspan="8">还没有足够的记录 —— 明天起就会有</td></tr>');
   }
 
   paintMemChart();
@@ -1637,6 +1676,13 @@ function renderBacktest() {
     { k: '扣成本后', v: (s.avg_ret > 0 ? '+' : '') + pct(s.avg_ret), s: s.gross_ret > 0 && s.avg_ret <= 0 ? '毛利被手续费吃光了' : `中间那个数 ${pct(s.med_ret)}`, c: s.avg_ret > 0 ? 'up' : 'down' },
     { k: '多少笔赚钱', v: pct(s.win_rate, 1), s: `不亏本至少要 ${pct(s.breakeven_wr || 0, 1)}`, c: s.win_rate >= (s.breakeven_wr || 50) ? 'up' : 'down' },
     { k: '亏小赚大', v: (s.payoff || 0).toFixed(2) + ' 倍', s: `赢的每笔平均 +${pct(s.avg_win)}，输的 ${pct(s.avg_loss)}`, c: s.payoff >= 1 ? 'up' : 'down' },
+    // 稳健分：0.6×中位折 + 0.4×最差折（tick-stock-panel 的做法）。
+    // 样本均值会被一笔幸运单拉高，看折间表现才说明不同环境下站不站得住。
+    { k: '稳健分',
+      v: s.robust == null ? '—' : (s.robust > 0 ? '+' : '') + pct(s.robust),
+      s: s.robust == null ? (s.warn || '交易数不足 5 折')
+        : `中位折 ${pct(s.median)} · 最差折 ${pct(s.worst)}${s.warn ? ' · ' + s.warn : ''}`,
+      c: s.robust > 0 ? 'up' : 'down' },
     { k: '平均拿几天', v: s.avg_hold + '天', s: `赚最多一笔 +${pct(s.max_win)}，亏最多 ${pct(s.max_loss)}`, c: 'warn' },
   ].map(x => `<div class="kpi ${x.c}"><div class="k">${x.k}</div><div class="v">${x.v}</div><div class="s">${x.s}</div></div>`).join('');
 
@@ -2819,7 +2865,7 @@ function setCardHTML(cat, p, w, dirty) {
         if (f.t === 'strat') {
           // 方案下拉：清单来自 /api/strategies，换一个就等于换一整套判定逻辑
           const list = (S.strats && S.strats.items) || [];
-          const cur = p.strategy || (S.strats && S.strats.current) || 'ma_cost_low';
+          const cur = p.strategy || (S.strats && S.strats.current) || 'oversold_bounce';
           const one = list.find(x => x.key === cur) || {};
           return `<div class="frow"><label>${f.n}${f.hint ? `<small>${f.hint}</small>` : ''}</label>
             <select data-k="strategy" data-t="str">${list.map(x =>
@@ -2987,7 +3033,7 @@ const SET_META = [
       + '<span style="opacity:.75">注意：量能（成交量放大/缩小）不是有效判据，组间差不到 1 个百分点。</span>',
     fields: [
       { k: 'market_gate', n: '市场状态不匹配时暂停买入', t: 'bool', hint: '推荐开。关掉就是不看大盘、硬跑，回测 -5.5%' },
-      { k: 'market_gate_pct', n: '放行阈值（大盘比 MA20 低几个百分点）', t: 'float', step: 0.5, min: 0, max: 5, hint: '默认 1。调大更保守（只在大盘更弱时才买），调到 0 表示只要大盘在均线下面就买' },
+      { k: 'market_gate_pct', n: '放行阈值（大盘比 MA20 低几个百分点）', t: 'float', step: 0.5, min: 0, max: 20, hint: '默认 1。调大更保守（只在大盘更弱时才买），调到 0 表示只要大盘在均线下面就买' },
     ]},
   { id: 'auto', title: '自动选股', tag: 'AUTO', fields: [
     { k: 'auto_scan', n: '打开软件就自动选股', t: 'bool', hint: '不用再手动点，软件自己按时间跑' },
@@ -3001,7 +3047,7 @@ const SET_META = [
   ]},
   { id: 'avg', title: '① 价格和平均成本的关系', tag: '核心', fields: [
     { k: 'entry_mode', n: '拿什么价格去比', t: 'select', opts: [['tail', '尾盘价（推荐，和你实际下单一致）'], ['close', '收盘价（只有想复现老口径时才用，等于提前知道收盘）']], hint: '尾盘买入要用尾盘价，不然等于偷看未来' },
-    { k: 'tail_from', n: '在几点判定', t: 'select', opts: [['14:30', '14:30（推荐）'], ['14:45', '14:45'], ['14:57', '14:57'], ['close', '收盘']] },
+    { k: 'tail_from', n: '在几点判定（等于你实际下单的时间）', t: 'select', opts: [['14:45', '14:45（推荐）'], ['14:30', '14:30'], ['14:50', '14:50'], ['14:57', '14:57'], ['close', '收盘']], hint: '定在这儿之后，名单才定型、才会进记忆；记下来的买入价就是这个时点的价' },
     { k: 'ma_days', n: '要连续几天都站上', t: 'int', min: 1, max: 10, hint: '默认 3 天' },
     { k: 'ma_ratio', n: '高出多少才算站上', t: 'float', step: 0.0005, min: 0.99, max: 1.05, hint: '1.0 = 平着也算；1.002 = 要高 0.2%' },
     { k: 'ma_tol', n: '允许几天不达标', t: 'int', min: 0, max: 3, hint: '0 = 一天都不能差' },
@@ -3062,6 +3108,32 @@ const SET_META = [
     设置项和弹窗共用 setCardHTML，字段/单位不会两边不一致 */
 function renderSettings() {
   if (!S.cfg) return;
+  // ---- 顶部的「锁定 / 解锁」横幅 ----
+  // 默认锁定：80 个参数对大多数场景是负担，而误改一个阈值就足以让整套逻辑跑偏。
+  // 锁定时只挡主页的快捷编辑（防误触）；点进弹窗是明确要改，那里仍然可编辑。
+  const locked = S.paramsLocked !== false;
+  const bar = $('#param-lock-bar');
+  if (bar) {
+    bar.className = 'param-lock ' + (locked ? 'on' : 'off');
+    bar.innerHTML = `
+      <b>${locked ? '参数已锁定（推荐设置）' : '参数已解锁'}</b>
+      <span>${locked
+        ? '当前是 40 笔回测、稳健分 +3.08 那一套，不用改也能直接用。'
+        : '改完记得点右上角「保存」。改坏了可以用右边一键恢复。'}</span>
+      <button class="btn sm" id="param-lock-btn">${locked ? '我要自己调' : '锁定回去'}</button>
+      ${locked ? '' : '<button class="btn sm ghost" id="param-reset-btn">恢复推荐设置</button>'}`;
+    const btn = $('#param-lock-btn');
+    if (btn) btn.onclick = () => { S.paramsLocked = !locked; renderSettings(); };
+    const rb = $('#param-reset-btn');
+    if (rb) rb.onclick = async () => {
+      try {
+        await api('/api/config/reset', {}, 'POST');
+        await loadConfig();
+        toast('已恢复推荐设置');
+      } catch (e) { toast('恢复失败：' + (e.message || e), true); }
+      renderSettings();
+    };
+  }
   $('#set-grid').innerHTML = SET_META.map(cat => {
     const head = cat.fields.slice(0, 4), rest = cat.fields.length - head.length;
     return `
@@ -3071,6 +3143,11 @@ function renderSettings() {
       ${rest > 0 ? `<button class="set-more" data-open="settings" data-tab="${cat.id}">这组还有 ${rest} 项 →</button>` : ''}
     </div>`;
   }).join('');
+  // 渲染完再禁用：锁定时主页的快捷编辑框全部置灰（防误触）。
+  // 弹窗是用户明确要改，那里仍然可编辑。
+  if (locked) {
+    $$('#set-grid [data-k]').forEach(el => { el.disabled = true; });
+  }
   bindToggles($('#set-grid'));
 }
 /** 一张卡里那些 frow（head 为空就是全部字段） */

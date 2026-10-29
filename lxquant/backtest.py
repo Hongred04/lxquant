@@ -122,21 +122,24 @@ def backtest_one(code: str, name: str, params: dict, lookback: int = 1000,
     start = max(win, n - lookback)
     # 市场状态开关：逐日判定，和实盘同一口径。市场不匹配的日子不开新仓，
     # 否则回测会把"本来就不该买"的交易也算进去，策略好坏就被市场环境掩盖了。
-    gate_on = bool(params.get("market_gate", True))
+    # 用 gate_on() 而不是 bool(params[...])：参数从表单/JSON 进来时可能是 "false"，
+    # bool("false") 是 True，会把关掉的开关又打开。
+    gate_on = False
+    try:
+        from . import market_state
+        gate_on = market_state.gate_on(params)
+    except Exception:
+        gate_on = False
+    sig_dates = h["date"].astype(str).tolist()
     trades = []
     i = start
     while i < n - 2:
         if not strat.signal_at(strats.Ctx(code, name, h, i=i, shared=shared), params):
             i += 1
             continue
-        if gate_on:
-            try:
-                from . import market_state
-                if not market_state.allow_on(h["date"].iloc[i], params):
-                    i += 1
-                    continue
-            except Exception:
-                pass
+        if gate_on and not market_state.allow_on(sig_dates[i], params):
+            i += 1
+            continue
 
         sig = h.iloc[i]
         sig_close = float(sig["close"])
@@ -321,6 +324,67 @@ def summarize(trades) -> dict:
     }
 
 
+def _note_prefix(params: dict) -> str:
+    """回测说明的第一句：开关到底开没开，必须跟参数一致。
+
+    原来这里写死"已应用市场状态开关"，用户在参数里关掉之后仍然这么显示 ——
+    文案和事实打架，会让人以为结果是在有开关的情况下跑出来的。
+    """
+    try:
+        from . import market_state
+        on = market_state.gate_on(params)
+        pct = market_state.gate_pct(params)
+    except Exception:
+        return ""
+    if on:
+        return (f"已应用市场状态开关（上证指数低于 MA20 的 {pct:g}% 才开仓）——"
+                "165 笔回测：不加开关 -5.5%，加了 +22%。\n")
+    return "市场状态开关已关闭：所有信号都算成交（对照口径，不是推荐用法）。\n"
+
+
+def robust_score(trades: list, k: int = 5) -> dict:
+    """按时间分成 k 折，算「稳健分」—— tick-stock-panel 的做法。
+
+        robust = 0.6 × 中位数折 + 0.4 × 最差折
+
+    为什么不用样本均值：一次 +44% 的幸运单就能把均值拉高一个百分点，
+    样本内均值高的策略实盘往往不行。看「折间表现」—— 连最差的一折都不能太差，
+    才说明这个策略在不同市场环境下都站得住。
+    """
+    out = {"robust": None, "median": None, "worst": None, "folds": [], "warn": ""}
+    ts = [t for t in (trades or []) if t.get("buy_date")]
+    ts.sort(key=lambda t: t["buy_date"])
+    n = len(ts)
+    if n == 0:
+        out["warn"] = "没有交易"
+        return out
+    if n < k:
+        out["warn"] = f"只有 {n} 笔交易，不足 {k} 折，稳健分不可信"
+        k = max(2, n)
+    folds = []
+    for i in range(k):
+        a, b = n * i // k, n * (i + 1) // k
+        seg = ts[a:b]
+        rets = [float(t.get("ret") or 0.0) for t in seg]
+        if not seg:
+            continue
+        avg = sum(rets) / len(rets)
+        folds.append({"n": len(seg),
+                      "from": seg[0].get("buy_date"),
+                      "to": seg[-1].get("buy_date"),
+                      "avg": round(avg, 3)})
+    vals = sorted(f["avg"] for f in folds)
+    med = vals[len(vals) // 2]
+    worst = vals[0]
+    out.update({
+        "folds": folds,
+        "median": round(med, 3),
+        "worst": round(worst, 3),
+        "robust": round(0.6 * med + 0.4 * worst, 3),
+    })
+    return out
+
+
 def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
                  mode: str = "balanced", lookback: int = 1000, progress=None) -> dict:
     """批量回测：给出每只票的交易明细 + 汇总统计。"""
@@ -365,6 +429,11 @@ def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
     if spans:
         coverage = {"from": min(s[0] for s in spans), "to": max(s[1] for s in spans),
                     "days": max(s[2] for s in spans)}
+    # 稳健分：分折看表现，防被单笔幸运交易拉高均值（tick-stock-panel 的做法）
+    try:
+        total.update(robust_score(all_trades, k=5))
+    except Exception:
+        pass
     return {
         "summary": total,
         "coverage": coverage,
@@ -375,7 +444,8 @@ def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
             "stop_loss", "take_profit", "max_hold", "sell_mode", "trail_drawdown",
             "buy_rule", "entry_mode", "ma_exit",
             "commission", "stamp", "slippage", "notional")},
-        "note": "已应用市场状态开关（指数低于 MA20 才开仓）——165 笔回测：不加开关 -5.5%，加了 +22%。\n回测用日线 VWAP 近似（免费源无长历史分时），只验证买卖点规则本身。"
+        "note": _note_prefix(params) +
+            "回测用日线 VWAP 近似（免费源无长历史分时），只验证买卖点规则本身。"
             "信号日次日开盘成交（不是当日收盘价，避免同一个 bar 内前视）；"
             "T+1 强制、止损/止盈按盘中高低点触发，跳空时按开盘价成交；"
             "ret 已扣佣金/印花税/过户费/滑点，gross 是扣前的毛利。"

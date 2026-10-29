@@ -1,17 +1,17 @@
 {
   "params": {
-    "strategy": "ma_cost_low",
+    "strategy": "oversold_bounce",
     "ma_days": 3,
     "ma_ratio": 1,
     "ma_tol": 0,
-    "tail_from": "14:30",
+    "tail_from": "14:45",
     "entry_mode": "tail",
     "preview_at": "14:00",
     "auto_scan": true,
     "auto_limit": 600,
     "auto_hours": "09:35-15:00",
     "auto_every": 300,
-    "auto_final": "14:50",
+    "auto_final": "14:45",
     "auto_final_enabled": true,
     "chip_window": 120,
     "chip_bins": 70,
@@ -51,7 +51,8 @@
     "max_hold": 10,
     "sell_mode": "atr",
     "trail_drawdown": 0.07,
-    "ma_exit": 0
+    "ma_exit": 0,
+    "market_gate": true
   },
   "weights": {
     "surplus": 25,

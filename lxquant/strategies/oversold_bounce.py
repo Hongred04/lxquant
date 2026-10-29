@@ -57,6 +57,13 @@ class OversoldBounce(Strategy):
     name = "跌多了抢反弹"
     desc = ("找近一个月跌得很惨、但今天开始有回头的票。逻辑是超跌反弹，"
             "赚的是情绪修复的钱，所以必须快进快出，拿久了就是个坑。")
+    # 这几项此前散在各 gate 函数的 p.get(...) 默认值里，界面上看不到。
+    # 显式声明后会经 Strategy.params() 合并进参数，参数页能直接调。
+    defaults = {
+        "drop_lookback": 20,
+        "drop_pct": 0.20,
+        "turn_min": 0.5,
+    }
     weights = {"drop": 40.0, "turn": 35.0, "pos": 25.0}
 
     gates = [

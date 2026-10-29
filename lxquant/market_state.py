@@ -72,47 +72,80 @@ def metrics():
     return out
 
 
-def state() -> dict:
-    """最新交易日的市场状态。返回 {date, vs20, vs60, ret20, volr, mode, note}"""
+def state(pct: float | None = None) -> dict:
+    """最新交易日的市场状态。返回 {date, vs20, vs60, ret20, volr, mode, note}
+
+    pct 是放行阈值（负几个百分点）。mode 必须按**同一个 pct** 判定，
+    否则会出现"界面显示适合买入、实际被拦下"的自相矛盾：
+    比如阈值调到 2% 而 vs20 是 -1.5% 时，按写死的 -1% 会标成 weak（绿），
+    但 allow() 用 -2% 判，结果是拒绝。
+    """
+    p = 1.0 if pct is None else max(0.0, float(pct))
     m = metrics()
     if not m:
         return {"date": "", "vs20": 0.0, "vs60": 0.0, "ret20": 0.0, "volr": 1.0,
-                "mode": "unknown", "note": "取不到指数数据，无法判断市场状态"}
+                "mode": "unknown", "note": "取不到指数数据，无法判断市场状态", "gate_pct": p}
     date = sorted(m)[-1]
     s = dict(m[date])
     s["date"] = date
-    s["mode"] = "weak" if s["vs20"] < -1.0 else ("strong" if s["vs20"] > 1.0 else "mid")
+    s["gate_pct"] = p
+    s["mode"] = "weak" if s["vs20"] < -p else ("strong" if s["vs20"] > p else "mid")
+    # 只给「位置 + 放不放行」两个事实。以前每条后面都跟一句解释性的判断
+    # （"超跌反转的主场""买进去容易变接盘"），但放不放行本来就由程序执行了，
+    # 用户看到数字和结论就够，多余的解释只会让状态条变长、还要花时间读。
     if s["mode"] == "weak":
-        s["note"] = (f"大盘在 MA20 下方 {abs(s['vs20']):.1f}% —— 超跌反转的主场，错杀盘多、反弹空间大")
+        s["note"] = f"MA20 下方 {abs(s['vs20']):.1f}% · 放行"
     elif s["mode"] == "strong":
-        s["note"] = (f"大盘在 MA20 上方 {s['vs20']:.1f}% —— 情绪已经转暖，超跌股没人接，"
-                     "买进去容易变接盘")
+        s["note"] = f"MA20 上方 {s['vs20']:.1f}% · 不放行"
     else:
-        s["note"] = (f"大盘贴着 MA20（{s['vs20']:+.1f}%）—— 这套规则历史上在这种环境最吃亏"
-                     "（胜率 20%、均 -1.6%），建议观望")
+        s["note"] = f"贴着 MA20（{s['vs20']:+.1f}%）· 不放行"
     return s
+
+
+def gate_on(params: dict | None = None) -> bool:
+    """开关是否打开。
+
+    不能直接 bool()：参数可能是从 JSON / 表单进来的字符串，
+    bool("false") 是 True —— 用户明明关了开关，程序当成开着。
+    """
+    v = (params or {}).get("market_gate", True)
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return True
+    return str(v).strip().lower() not in ("0", "false", "off", "no", "")
+
+
+def gate_pct(params: dict | None = None) -> float:
+    """放行阈值（负几个百分点）。
+
+    这里**不能写 `... or 1.0`**：用户把阈值调到 0（"只要大盘在均线下方就买"）
+    时 0 是假值，会被 or 吞成 1.0 —— 参数页的说明就变成了谎话。
+    """
+    v = (params or {}).get("market_gate_pct", 1.0)
+    try:
+        return max(0.0, float(v))
+    except Exception:
+        return 1.0
 
 
 def allow(params: dict | None = None, st: dict | None = None) -> bool:
     """市场状态是否放行买入。params.market_gate=False 时永远放行。"""
-    p = params or {}
-    if not bool(p.get("market_gate", True)):
+    if not gate_on(params):
         return True
     if st is None:
         try:
-            st = state()
+            st = state(gate_pct(params))
         except Exception:
             return True
     if st.get("mode") == "unknown":
         return True
-    pct = float(p.get("market_gate_pct", 1.0) or 1.0)
-    return float(st.get("vs20", 0.0)) < -pct
+    return float(st.get("vs20", 0.0)) < -gate_pct(params)
 
 
 def allow_on(date: str, params: dict | None = None) -> bool:
     """某一天的市场状态是否放行（回测逐日判定用；查不到当天就放行）"""
-    p = params or {}
-    if not bool(p.get("market_gate", True)):
+    if not gate_on(params):
         return True
     try:
         st = metrics().get(str(date)[:10])
@@ -120,18 +153,16 @@ def allow_on(date: str, params: dict | None = None) -> bool:
         return True
     if not st:
         return True
-    pct = float(p.get("market_gate_pct", 1.0) or 1.0)
-    return float(st.get("vs20", 0.0)) < -pct
+    return float(st.get("vs20", 0.0)) < -gate_pct(params)
 
 
 def why(params: dict | None = None, st: dict | None = None) -> str:
     """被 gate 拦下时，告诉用户一句人话"""
-    p = params or {}
+    pct = gate_pct(params)
     try:
-        st = st or state()
+        st = st or state(pct)
     except Exception:
         return ""
-    pct = float(p.get("market_gate_pct", 1.0) or 1.0)
     return (f"市场状态不匹配：大盘相对 MA20 是 {st.get('vs20', 0):+.1f}%，"
             f"要求低于 -{pct:.1f}%（指数真弱时超跌反转才有效）。"
             f"下面这批是本来会选中的，先放进观察池。")

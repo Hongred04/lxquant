@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+import sys
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -117,7 +118,9 @@ def job_screen(j: Job, params, weights, limit, mode, preview_at=None):
     _save_last_screen(r)
     try:                                   # 选股记忆：一天一条，回头看准不准
         from . import memory
-        memory.save_result(r)
+        # force=True：这是手动/接口触发的选股，允许覆盖当天已定型的记录
+        # （自动扫描那条路径传 False，避免 14:50、14:55 的重扫把 14:45 的买入价改掉）
+        memory.save_result(r, force=True)
     except Exception:
         traceback.print_exc()
     return r
@@ -690,6 +693,12 @@ def _make_server(host="127.0.0.1", port=8777):
 
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
+    # ★ Windows 上 SO_REUSEADDR 的语义是「允许抢占已被监听的端口」：
+    #   两个进程都设了它，就都能 bind 同一个端口，请求被内核随机分给其中一个。
+    #   这跟 Linux 上「复用 TIME_WAIT」完全是两回事。
+    #   不关掉的话，本程序绑 8777 不会失败，而是和另一个服务（如 etf-quant）共享
+    #   同一个端口 —— 表现就是「打开 8777 有时是别的程序」。
+    allow_reuse_address = sys.platform != "win32"
 
     def handle_error(self, request, client_address):
         """浏览器取消请求（ConnectionReset/ConnectionAborted）是常态，不要刷屏堆栈。"""

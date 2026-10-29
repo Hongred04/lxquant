@@ -54,3 +54,9 @@ android/build/
 android/app/src/main/assets/*.zip
 # 签名密钥：本机私有，绝不进仓库
 android/signkey.ks
+
+# 隔离目录：删掉的旧策略 / 旧策略产生的记忆记录，留作本地备查，不进仓库
+data/*_quarantine/
+
+# 临时图标（没有代码引用）
+股票.ico

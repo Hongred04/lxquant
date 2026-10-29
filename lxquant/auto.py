@@ -150,7 +150,7 @@ def _run_once(reason: str, store: bool = True, limit: int | None = None) -> None
         _STATE["last_run"] = now.strftime("%Y-%m-%d %H:%M:%S")
         _STATE["runs"] += 1
         _STATE["last_error"] = ""
-        _STATE["last_reason"] = (reason + " · " + _hit_info(reason))[:80]
+        _STATE["last_reason"] = (reason + " · " + _hit_info(reason))[:120]
 
 
 def _hit_info(reason: str) -> str:
@@ -160,8 +160,18 @@ def _hit_info(reason: str) -> str:
         r = server._last_screen.get("result") or {}
         st = r.get("stats") or {}
         if st:
-            return (f"扫了 {st.get('scanned', 0)} 只，选出 {st.get('hit', 0)} 只"
-                    f" · 用时 {st.get('elapsed', 0)} 秒")
+            msg = (f"扫了 {st.get('scanned', 0)} 只，选出 {st.get('hit', 0)} 只"
+                   f" · 用时 {st.get('elapsed', 0)} 秒")
+            # 市场状态不匹配时，「选出 0 只」会让人以为是不符合条件的票太少，
+            # 其实是主动停手 —— 必须说清楚，否则会反复点「立即选股」找票
+            if st.get("gated"):
+                ms = st.get("market") or {}
+                try:
+                    v = float(ms.get("vs20"))
+                    msg += f"（大盘 {v:+.1f}% 对 MA20，市场状态不匹配，暂停买入）"
+                except Exception:
+                    msg += "（市场状态不匹配，暂停买入）"
+            return msg
         return "扫描完成，但没有拿到数据"
     except Exception:  # noqa: BLE001
         return ""

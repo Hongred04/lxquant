@@ -236,16 +236,18 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
     # 这套规则是"超跌反转"，只在大盘真弱（指数在 MA20 下方）时才有胜算。
     # 市场状态不匹配时不产生可买名单，但把"本来会选中的"放进观察池，
     # 免得用户看到空表以为软件坏了。见 market_state 的模块说明。
-    ms, gated = {}, False
+    ms, gated, gated_n = {}, False, 0
     try:
         from . import market_state
-        ms = market_state.state()
+        # mode 要按当前阈值算，否则界面显示和实际判定会打架
+        ms = market_state.state(market_state.gate_pct(params))
         # gated 表示"市场状态不匹配"，跟这次有没有选出票无关 ——
         # 界面要能看出「现在不该玩这套规则」，而不是等空表才解释
         gated = not market_state.allow(params, ms)
     except Exception:
         ms, gated = {}, False
     if gated and items:
+        gated_n = len(items)
         reason = ""
         try:
             reason = market_state.why(params, ms)
@@ -297,6 +299,8 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
             # 市场状态：让界面能看到"现在该不该玩这套规则"，以及为什么被拦下
             "market": (ms or None),
             "gated": gated,
+            # 被 gate 拦下的数量：界面靠它区分「本来有票被拦」和「本来就没票」
+            "gated_n": gated_n,
             # 把这次实际用的条件一起带走：详情页要用同一套参数重算，
             # 否则会出现"名单里 75 分、点进去 0 分"的自相矛盾
             "params": dict(params),
@@ -309,13 +313,17 @@ def run_screen(params: dict, weights: dict, limit: int = 400, mode: str = "balan
 def basis_label(params: dict) -> str:
     """这次名单是按什么口径算出来的：tail（尾盘定型）/ preview（没定型）/ close（收盘）。
 
-    entry_mode=tail 时不能一律标 tail：只要现在还没到 tail_from（默认 14:30），
-    用的就是"截至此刻"的均价线，名单还会变 —— 标成 tail 会让记忆页把一份
-    上午 10 点的半成品当成当天的正式名单存下来（这个坑已经踩过：
-    13:06 的记录 basis 写的是 tail，实际是盘中试算）。
+    判定只看**现在到没到 tail_from（默认 14:30）**：
+      * 到了  → tail，名单定型，可以记账（这一笔的买入价就是尾盘价）
+      * 没到  → preview，用的还是"截至此刻"的均价线，名单随时会变
+
+    以前这里第一行写的是 `if params.get("preview_at"): return "preview"` ——
+    而 preview_at 默认就是 14:00，于是**全天候返回 preview**：14:35 跑出来的
+    正式名单也被当成试算，永远不进记忆。更糟的是反过来理解也成立：
+    只要用户把 preview_at 设成 off，10:00 打开软件跑的那次就会被当成
+    "尾盘定型"存进记忆，用上午的价格冒充 14:30 的买入价。
+    preview_at 只决定"从几点开始提前试算"，跟名单定没定型是两件事。
     """
-    if params.get("preview_at"):
-        return "preview"
     if str(params.get("entry_mode", "tail")) != "tail":
         return "close"
     tf = str(params.get("tail_from", "14:30") or "")
@@ -395,5 +403,17 @@ def run_scan(params: dict, weights: dict, limit: int = 60, mode: str = "balanced
                 log(phase="scan", msg=f"已扫描 {done}/{n}", pct=8 + int(88 * done / max(n, 1)))
     items.sort(key=lambda x: (-x["passed"], -(x["avg"]["avg_surplus"] or -9)))
     log(phase="done", msg=f"{n} 只扫描完成", pct=100)
-    return {"items": items, "stats": {"scanned": n, "elapsed": round(time.time() - t0, 1)},
+    # 宽松扫描是「盯盘/调试」工具，不拦截买入（那是 run_screen 的事），
+    # 但必须把当前市场状态一起带出去 —— 否则用户只看到一堆放量票，
+    # 不知道此刻根本不该开仓。
+    ms, gated = {}, False
+    try:
+        from . import market_state
+        ms = market_state.state(market_state.gate_pct(params))
+        gated = not market_state.allow(params, ms)
+    except Exception:
+        pass
+    return {"items": items,
+            "stats": {"scanned": n, "elapsed": round(time.time() - t0, 1),
+                      "market": (ms or None), "gated": gated},
             "generated_at": time.strftime("%Y-%m-%d %H:%M:%S")}

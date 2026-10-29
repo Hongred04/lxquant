@@ -402,7 +402,7 @@ function paintModal() {
   if (MD.id === 'detail') {
     const st = (r && r.stats) || {}, f = (r && r.funnel) || {};
     let mk = '';
-    if (r && st.market && st.market.date) {
+    if (r && st.market && st.market.date && st.market.vs20 != null) {
       const v = +st.market.vs20;
       mk = ` · 大盘 ${v >= 0 ? '+' : ''}${v.toFixed(1)}%（对 MA20）`;
       if (st.gated) mk += ' · 暂停买入';
@@ -665,7 +665,9 @@ async function runScan() {
     S.scanItems = (r.result && r.result.items) || [];
     S.scanRan = true;
     paintScan();
-    toast(`看完 ${S.scanItems.length} 只`);
+    const sst = (r.result && r.result.stats) || {};
+    toast(sst.gated ? `看完 ${S.scanItems.length} 只 —— 大盘不配合，先别急着买`
+      : `看完 ${S.scanItems.length} 只`);
   } catch (e) { toast('扫描失败：' + e.message, true); }
   finally {
     S.busy.scan = false;

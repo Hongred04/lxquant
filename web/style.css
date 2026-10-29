@@ -199,7 +199,11 @@ main.main.is-sub{gap:0}
 }
 .tb-left{display:flex;align-items:baseline;gap:10px;min-width:0}
 .tb-left h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.3px}
-.tb-hint{font-size:11.5px;color:var(--txt-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb-hint{font-size:11.5px;color:var(--txt-3);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;min-width:0;max-width:520px}
+/* 空的时候完全占 0 宽：顶栏副标题默认不再挂标语（见 app.js 的 HINTS 注释），
+   只有状态信息（扫描中/上次更新时间）出现时才占位 */
+.tb-hint:empty{display:none}
 .tb-right{display:flex;gap:8px;align-items:center}
 .topbar #view-hint{min-width:0}
 /* 窄屏先把提示语收起来，别把右边按钮挤出去 */
@@ -477,6 +481,11 @@ table.grid tbody tr.sel{background:rgba(47,139,255,.1)}
 /* 目标价、止损价这两列只是参考档位，不是当天的行情，压成次要色免得抢现价和涨跌 */
 table.grid tbody td.ref{color:var(--txt-2)}
 .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+/* 表头也要跟着右对齐：`table.grid thead th` 写了 text-align:left，特异性比 .num 高，
+   不显式覆盖的话表头贴左、数字贴右，整张表看起来就是错位的（记忆页成绩单最明显） */
+table.grid thead th.num{text-align:right}
+/* 分组表头（如「能买 · 算进胜率」跨三列）居中，否则会贴着第一列左边缘，看着像错位 */
+table.grid thead th.grp{text-align:center}
 /* 主数字后面挂的小字（如目标价后的 +15.0%）：不抢主数字的视觉权重 */
 td em.sub{
   display:block;font-style:normal;font-size:10px;line-height:1.2;
@@ -1010,3 +1019,30 @@ html[data-theme="light"] .wl .wv.sell{background:rgba(10,150,110,.08)}
   .modal{width:96vw;max-height:90vh}
 }
 
+
+
+/* ---- 参数页的「锁定」横幅 ---- */
+.param-lock{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:12px 16px;border-radius:12px;margin-bottom:14px;font-size:13px;
+  background:var(--mi-bg);border:1px solid var(--line);
+}
+.param-lock b{color:var(--txt)}
+.param-lock span{color:var(--txt-2);flex:1;min-width:200px}
+.param-lock.on{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.28)}
+.param-lock.off{background:rgba(251,191,36,.08);border-color:rgba(251,191,36,.28)}
+
+/* ---- 规则一览（方法页）----
+   一行一条规则：编号 / 名称 / 阈值 / 状态。详细解释放进 title（hover 才出），
+   不占据面板空间 —— 想看的人悬停就能看到，不想看的人不用滚动。 */
+.rules{display:flex;flex-direction:column;padding:2px 16px 6px}
+.rule{display:grid;grid-template-columns:26px minmax(130px,auto) 1fr auto;
+  gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line-2)}
+.rule:last-child{border-bottom:0}
+.rule b{font-size:13px;color:var(--txt-3);text-align:center;font-weight:600}
+.rule .ru-t{font-size:14px;color:var(--txt);font-weight:600}
+.rule code{font-size:12.5px;color:var(--txt-2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.rule i{font-style:normal;font-size:11px;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.rule i.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.rule i.off{color:var(--txt-3);background:var(--mi-bg)}
+.rules-foot{display:flex;align-items:center;gap:10px;padding:14px 20px;margin-top:4px;border-top:1px solid var(--line-2)}

@@ -140,7 +140,6 @@
         </label>
         <button class="btn primary" id="btn-scan"><i data-ic="play"></i>马上看一眼</button>
         <span class="spacer"></span>
-        <span class="muted">只看「今天有没有资金在托着价」，不管上方套牢盘和价格位置 —— 适合盘中有空随手扫一眼</span>
       </div>
       <div class="progress-wrap" id="scan-prog" hidden>
         <div class="pg-head"><span id="scan-msg">准备中…</span><b id="scan-pct">0%</b></div>
@@ -190,14 +189,13 @@
         </label>
         <label class="inl">看谁
           <select id="mem-src">
-            <option value="all" selected>能买的 + 值得盯着的</option>
-            <option value="hit">只看「能买」的</option>
+            <option value="hit" selected>只看「能买」的</option>
+            <option value="all">能买的 + 值得盯着的</option>
             <option value="watch">只看「值得盯着」的</option>
           </select>
         </label>
         <button class="btn ghost" id="btn-mem-refresh"><i data-ic="reset"></i>重新算一遍</button>
         <span class="spacer"></span>
-        <span class="chip">每次选完自动记一笔，这里回头看它后来涨没涨</span>
       </div>
 
       <div class="kpis" id="mem-kpis"></div>
@@ -205,12 +203,11 @@
       <!-- 算涨跌幅要一只一只取日线，第一次会慢一两秒；这中间不能是一片空的 -->
       <div class="empty-state" id="mem-loading" hidden>
         <b><span class="spin"></span> 正在算这几天涨了多少…</b>
-        <span>按日线收盘价一只一只算，头一次会慢一两秒，算完就存在本地，下次快。</span>
       </div>
 
       <div class="empty-state" id="mem-empty" hidden>
         <b>还没有能回看的记录</b>
-        <span id="mem-empty-txt">从今天起，每次选股（自动的、手动的都算）都会在本地记一笔：那天选了谁、选的时候多少钱、给它定的止损止盈。<br>过几天回到这一页，就能看到「那天选的这批，到今天赚了还是亏了」—— 这是验证这套选股到底准不准的唯一办法。</span>
+        <span id="mem-empty-txt">每天选完自动存一份（谁、多少钱、止损止盈）。过几天回来就能看到涨没涨。</span>
       </div>
 
       <div class="row2" id="mem-row2" hidden>
@@ -248,11 +245,20 @@
         </div>
         <div class="tablewrap" style="max-height:340px" data-src="memdays">
           <table class="grid">
-            <thead><tr>
-              <th>日期</th><th class="num">记了几只</th><th class="num">其中「能买」</th>
-              <th class="num">到今天平均涨了%</th><th class="num">赚钱的比例</th><th class="num">过了几天</th>
-            </tr></thead>
-            <tbody id="tb-memdays"><tr class="empty"><td colspan="6">—</td></tr></tbody>
+            <thead>
+              <tr>
+                <th rowspan="2">日期</th>
+                <th rowspan="2" class="num">记了几只</th>
+                <th colspan="3" class="grp">能买 · 算进胜率</th>
+                <th colspan="2" class="grp">值得买 · 只作参考</th>
+                <th rowspan="2" class="num">过了几天</th>
+              </tr>
+              <tr>
+                <th class="num">只数</th><th class="num">平均涨了%</th><th class="num">赚钱的比例</th>
+                <th class="num">平均涨了%</th><th class="num">赚钱的比例</th>
+              </tr>
+            </thead>
+            <tbody id="tb-memdays"><tr class="empty"><td colspan="8">—</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -287,7 +293,7 @@
         </label>
         <button class="btn primary" id="btn-bt"><i data-ic="play"></i>开始检验</button>
         <span class="spacer"></span>
-        <span class="chip warn">只看信号本身好不好，不涉及钱；能赚多少请看「模拟账户」</span>
+        <span class="chip warn">只看信号，不看钱</span>
       </div>
       <div class="progress-wrap" id="bt-prog" hidden>
         <div class="pg-head"><span id="bt-msg">准备中…</span><b id="bt-pct">0%</b></div>
@@ -297,7 +303,7 @@
       <div class="kpis-more" id="bt-more"><button class="btn sm ghost" data-open="bt" title="在大窗口里看：KPI、单笔收益分布、卖出原因和明细细表">在整屏里看<em>⤢</em></button></div>
       <div class="empty-state" id="bt-empty">
         <b>还没检验过</b>
-        <span>「开始检验」会拿过去一年的行情，按同一套买卖规则一笔一笔回放，告诉你这些信号本身值不值得跟。<br>这里只看信号质量，不看钱 —— 想知道一笔本金最后能变成多少，去「模拟账户」。</span>
+        <span>点「开始检验」，拿过去一年行情按同一套规则回放一遍。</span>
       </div>
       <div class="row2" id="bt-row2">
         <div class="panel">
@@ -382,7 +388,7 @@
         </label>
         <button class="btn primary" id="btn-pf"><i data-ic="play"></i>模拟一遍</button>
         <span class="spacer"></span>
-        <span class="chip warn">真金白银地算：钱只有一份，买满了后面信号就买不进</span>
+        <span class="chip warn">钱只有一份，买满就进不来</span>
       </div>
       <div class="progress-wrap" id="pf-prog" hidden>
         <div class="pg-head"><span id="pf-msg">准备中…</span><b id="pf-pct">0%</b></div>
@@ -392,7 +398,7 @@
       <div class="kpis-more" id="pf-more"><button class="btn sm ghost" data-open="pf" title="在大窗口里看：KPI、资金曲线、成本明细和成交记录">在整屏里看<em>⤢</em></button></div>
       <div class="empty-state" id="pf-empty">
         <b>还没模拟过</b>
-        <span>「模拟一遍」会假装给你一笔本金，按同一套买卖规则真金白银地买、卖，算手续费和滑点，看看一年下来账户剩多少。<br>它比「信号检验」更接近真实情况：钱只有一份，买满了后面的信号就买不进去。</span>
+        <span>点「模拟一遍」，给一笔本金按同一套规则真买真卖，扣手续费和滑点。</span>
       </div>
       <div class="row2" id="pf-row2">
         <div class="panel">
@@ -423,148 +429,55 @@
     <section class="view" id="view-method">
       <div class="hd">
       <header class="topbar"></header>
-      <div class="toolbar">
-        <span class="muted">都是一句话能讲清的规则，挑着看就行</span>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><b>入选条件</b><span class="muted">五条全过才算「能买」</span></div>
+        <div class="rules meth-body" data-part="rule">
+          <div class="rule" title="分时图上那条黄线。价格在它上方，说明今天进场的人都在赚钱，还有人愿意出更高价接货。">
+            <b>1</b><div class="ru-t">站上当日均价线</div><code>14:45 价 &gt; 当日均价</code><i class="on">必过</i>
+          </div>
+          <div class="rule" title="现价上方压着的、等着解套的筹码，越少涨起来越没阻力。">
+            <b>2</b><div class="ru-t">上方套牢盘不多</div><code>≤ 25%</code><i class="on">必过</i>
+          </div>
+          <div class="rule" title="现价在最近 120 天高低区间里的位置，越低下跌空间越小。">
+            <b>3</b><div class="ru-t">价格在低位</div><code>120 日区间 ≤ 30%</code><i class="on">必过</i>
+          </div>
+          <div class="rule" title="跌不动了在横盘，而不是从高处一路往下砸的中途。">
+            <b>4</b><div class="ru-t">底部横着走</div><code>20 日振幅 ≤ 40% · 斜率 ≤ 12%</code><i class="on">必过</i>
+          </div>
+          <div class="rule" title="大方向没坏。它和「价格在低位」天然矛盾，打开后能选的票会少很多。">
+            <b>5</b><div class="ru-t">站上 20 日均线</div><code>收盘 &gt; MA20</code><i class="off">默认关</i>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><b>买卖规则</b><span class="muted">软件定好，可在参数里改</span></div>
+        <div class="rules meth-body" data-part="trade">
+          <div class="rule" title="不隔夜等：晚上出利空会跳空低开，第二天开盘又常常高开。">
+            <b>B</b><div class="ru-t">买</div><code>选出当天 14:45 前后</code><i class="on">不隔夜</i>
+          </div>
+          <div class="rule" title="ATR 动态止损，实际约等于现价下方 2.5%~6%，名单上每只都写着具体价位。">
+            <b>S</b><div class="ru-t">止损</div><code>ATR 动态 · 约 −6%</code><i class="on">先到先走</i>
+          </div>
+          <div class="rule" title="摸到就走，不贪最后一段。">
+            <b>S</b><div class="ru-t">止盈</div><code>+15%</code><i class="on">先到先走</i>
+          </div>
+          <div class="rule" title="十天还没走出来就换人，钱不压在一个不懂的票上。">
+            <b>S</b><div class="ru-t">到期</div><code>持满 10 个交易日</code><i class="on">先到先走</i>
+          </div>
+        </div>
+      </div>
+
+      <div class="rules-foot">
+        <span class="muted">数字都能在参数设置里改</span>
         <span class="spacer"></span>
-        <a class="btn ghost sm" data-go="backtest" href="?v=backtest">看看信号质量<em>信号检验</em></a>
-        <a class="btn ghost sm" data-go="settings" href="?v=settings">改门槛<em>参数设置</em></a>
-      </div>
-      <div class="meth-grid">
-
-        <div class="panel">
-          <div class="ph"><b>软件挑股的五个条件</b><span class="muted">全满足才算「能买」</span>
-            <span class="spacer"></span>
-            <button class="btn sm ghost" data-open="method" data-tab="rule" title="在大窗口里逐条看这五个条件">逐条细看<em>⤢</em></button>
-          </div>
-          <div class="meth-body fold-part" data-part="rule">
-            <div class="step">
-              <b class="step-n">①</b>
-              <div>
-                <h5>连涨三天，价格一直站在「平均成本」上方 <span class="tag-hot">最难过的一关</span></h5>
-                <p>分时图上的那条黄线，含义是<b>今天所有买的人的平均买入价</b>。价格一直在黄线上方，说明今天进场的人全都在赚钱，而且还有人愿意出更高的价接货 —— 这是有钱在往里进的直接证据。</p>
-                <p>软件看的是<b>下午 14:30 那一刻</b>：那时价格在黄线上方，就说明你此刻下单买，也是在赚钱的人那一队里。为什么不用收盘价？因为你要在 14:30 就下单，那时的黄线还没定型，用收盘价判断等于提前知道了答案。</p>
-                <p class="eq">高出平均成本多少 = 价格 ÷ 黄线 − 1，越正越好</p>
-                <p class="muted" style="font-size:12px;margin-top:4px">全市场实测：按收盘价算能站上的股票，八成在 14:30 那一刻还站不上。所以这道关不能放松。</p>
-              </div>
-            </div>
-            <div class="step">
-              <b class="step-n">②</b>
-              <div>
-                <h5>上面没有一堆套牢的人在等着解套</h5>
-                <p>软件会模拟一遍：这只股票在每个价位上还压着多少筹码。如果现价上方压着很多筹码，股价一涨上去这些人就急着卖回本，涨不动。</p>
-                <p>所以只挑<b>上方空荡荡</b>的——上面没什么人，涨起来才没有阻力。</p>
-                <p class="eq">套牢盘≤ 25%：压在现价上方、等着解套的筹码不超过四分之一</p>
-              </div>
-            </div>
-            <div class="step">
-              <b class="step-n">③</b>
-              <div>
-                <h5>价格在低位，不是已经涨上去的半山腰</h5>
-                <p>同样的筹码结构，在山顶和在山脚是两回事。软件把最近 120 天的最高价和最低价拉一条线，看现在处在什么位置。</p>
-                <p class="eq">价格位置 ≤ 30%：现在在最近 120 天区间的下方三成以内</p>
-                <p class="muted" style="font-size:12px;margin-top:4px">低位的意义是<b>跌无可跌</b>：往下空间小，往上空间大。但它不代表不会继续跌——所以后面还有一条止损线兜着。</p>
-              </div>
-            </div>
-            <div class="step">
-              <b class="step-n">④</b>
-              <div>
-                <h5>在底部横着，没有一路往下掉</h5>
-                <p>只做「跌不动了、开始横盘」的股票，不做「刚从高处一路砸下来」的下跌中途。</p>
-                <p>判断方法很简单：最近 20 天波动不大（最高价 ÷ 最低价 − 1 不超过 40%），而且这 20 天的收盘价没有单边往下掉（回归斜率不超过 12%）。</p>
-                <p class="muted" style="font-size:12px;margin-top:4px">「横着走」= 有人在同一个价位反复接货，卖的人已经卖得差不多了。这条可以在「参数设置」里关掉。</p>
-              </div>
-            </div>
-            <div class="step">
-              <b class="step-n">⑤</b>
-              <div>
-                <h5>还在 20 日均线上 <span class="tag-hot" style="color:var(--txt-3);border-color:var(--line-2)">可关</span></h5>
-                <p>最后一道保险：日线的 20 日均线没被跌破，说明大方向没坏，不是在一个长期下跌趋势里抢反弹。</p>
-                <p class="muted" style="font-size:12px;margin-top:4px">这条默认<b>不开</b>（参数设置里「要求站在 20 日均线上」）。想要更严格就打开，代价是能买的股票会少很多。</p>
-              </div>
-            </div>
-            <div class="step">
-              <b class="step-n">★</b>
-              <div>
-                <h5>自动帮你看着，到点提醒 <span class="tag-hot" style="color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,transparent)">不用手动点</span></h5>
-                <p>打开软件它就开始干活，你不用管：</p>
-                <ul>
-                  <li><b>开盘后</b>自动扫一遍，把候选都找出来</li>
-                  <li><b>盘中每 5 分钟</b>自动重新扫一次（不费你的事）</li>
-                  <li><b>14:00 之后</b>先按当前价格试算一遍，把最可能在 14:30 达标的挑出来盯着</li>
-                  <li><b>14:50</b> 最后扫一次，这时名单就是可以直接下单的</li>
-                </ul>
-                <p class="muted" style="font-size:12px;margin-top:4px">周六日、法定假日自动休息。就算白天没开软件，14:50 之后打开也会立刻补一次最终名单；上次的名单存在本地，重开软件不用重新等。想改这几个时间点，到「参数设置→ 自动选股」里改。</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="ph"><b>什么时候买、什么时候卖</b><span class="muted">软件已经定好，可在「参数设置」改</span>
-            <span class="spacer"></span>
-            <button class="btn sm ghost" data-open="method" data-tab="trade" title="在大窗口里看买卖规则和买多少">细看<em>⤢</em></button>
-          </div>
-          <div class="meth-body fold-part" data-part="trade">
-            <div class="step buy">
-              <b class="step-n b">B</b>
-              <div>
-                <h5>买：看到名单当天下午就买</h5>
-                <p>14:30 确认条件还成立，就在<b>当天尾盘 14:45 前后买进去</b>，不要拖到第二天。</p>
-                <p class="eq">为什么不等第二天？一是晚上出利空会跳空低开，二是第二天开盘往往直接高开，你要么追高要么买不到</p>
-                <p class="muted" style="font-size:12px">两种买法对比过（40 只 × 近一年）：当天尾盘买胜率 44.4%、累计多赚 73.9%；等第二天开盘买胜率 46.8%、累计只多赚 46.0%。尾盘买赚得多，虽然赢的次数少一些。</p>
-              </div>
-            </div>
-            <div class="step sell">
-              <b class="step-n s">S</b>
-              <div>
-                <h5>卖：三层保护，任何一层触发就走</h5>
-                <ul>
-                  <li><b>亏了就走</b>：收盘跌破止损价就走（每只都不一样，名单上直接写着；大约比现价低 2.5%~6%）</li>
-                  <li><b>连续两天掉到平均成本下面</b>：说明当天的买盘已经不赚钱了，判断失效，走人（只看一天容易被日内噪声吓出来）</li>
-                  <li><b>赚了以后</b>：赚到 +5% 就开始盯着，从持仓最高点回落 7% 就清仓（你也可以在参数里改成"到目标价 +15% 直接卖"）</li>
-                  <li><b>拖太久也走</b>：最多拿 10 个交易日，到期没动静就换下一只</li>
-                </ul>
-              </div>
-            </div>
-            <div class="step">
-              <b class="step-n">钱</b>
-              <div>
-                <h5>买多少</h5>
-                <p>把握度越高买越多：80 分以上用 20% 的钱、70 分以上 15%、60 分以上 10%、其余 5%。单只股票最多用总资金的两成。</p>
-                <p class="muted" style="font-size:12px;margin-top:4px">这套规则我用真实账户模拟验证过：钱只有一份，买满了后面的信号就买不进去。所以别一次梭哈，分批更好。</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel fold" id="fold-data">
-          <div class="ph" data-fold>
-            <b>数据从哪来</b><span class="muted">这部分偏技术，不看也能用</span>
-            <span class="spacer"></span>
-            <span class="fold-hint">展开看看</span><i class="fold-caret" data-ic="chevron"></i>
-          </div>
-          <div class="fold-body">
-          <div class="meth-body">
-            <table class="htbl">
-              <tbody>
-                <tr><td class="k">行情</td><td>新浪财经（实时报价 / 5 分钟线 / 日线），日线不复权</td></tr>
-                <tr><td class="k">平均成本线</td><td>由 5 分钟线逐日累加算出来，就是行情软件里那条黄色均价线（今累计成交额 ÷ 累计成交量）</td></tr>
-                <tr><td class="k">套牢盘怎么算</td><td>用每天的换手率往前推：换手多的一天就把老筹码冲掉得多，换手少的股票筹码记得久（算法参考开源项目 adata）</td></tr>
-                <tr><td class="k">节假日</td><td>软件自带 2022-2026 年交易日历，离线就能判断今天开不开市</td></tr>
-                <tr><td class="k">缓存</td><td>日线 6 小时、盘中 5 分钟更新一次，所以再扫会快很多</td></tr>
-                <tr><td class="k">界面</td><td>左下角「亮色 / 暗色」按钮可切换主题，你自己选的那个会被记住</td></tr>
-              </tbody>
-            </table>
-            <div class="hintline" style="margin-top:10px">本软件只做数据统计和规则筛选，不构成任何投资建议。过去的成绩不代表以后也能赚。</div>
-          </div>
-          </div><!-- /fold-body -->
-        </div>
-
-      </div>
+        <a class="btn ghost sm" data-go="backtest" href="?v=backtest">看信号质量</a>
+        <a class="btn ghost sm" data-go="settings" href="?v=settings">改门槛</a>
       </div>
     </section>
 
-    <!-- ---------- 设置 ---------- -->
     <section class="view" id="view-settings">
       <div class="hd">
       <header class="topbar"></header>
@@ -575,6 +488,7 @@
         <span class="muted">不确定就保持默认，默认值是调过的</span>
         <button class="btn ghost" id="btn-clear"><i data-ic="trash"></i>清空缓存</button>
       </div>
+      <div class="param-lock" id="param-lock-bar"></div>
       <div class="set-grid" id="set-grid"></div>
       <div class="muted set-tip">每张卡只放最常用的几项，点了「还有 N 项 / 开」把那一组摊开成一屏再来改。</div>
       </div>

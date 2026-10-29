@@ -21,13 +21,13 @@ CONFIG_FILE = DATA_DIR / "config.json"
 # ---------------------------------------------------------------- 默认参数
 DEFAULT_PARAMS = {
     # ---- 策略方案（换一套选股逻辑只要改这里，见 lxquant/strategies/）----
-    "strategy": "ma_cost_low",  # 用哪个方案；data/strategies/ 里的新方案也会出现在界面上
+    "strategy": "oversold_bounce",   # 5 折稳健分唯一为正的策略（+3.08），见 backtest.robust_score  # 用哪个方案；data/strategies/ 里的新方案也会出现在界面上
 
     # ---- 分时均价线 ----
     "ma_days": 3,              # 连续多少天收盘价站上分时均价线
     "ma_ratio": 1.000,         # 收盘价 >= 当日均价线 * 该系数（1.000 = 只要站上）
     "ma_tol": 0.0,             # 允许其中 N 天"轻微不达标"（容忍度，0 = 全部必须达标）
-    "tail_from": "14:30",      # 尾盘口径：用该时刻的价 vs 截至该时刻的均价线（尾盘买入必须这样算）
+    "tail_from": "14:45",      # 尾盘口径的判定时刻＝实际下单时刻：记进记忆的买入价必须是这个时点的价
     "entry_mode": "tail",      # tail: 尾盘口径为准(推荐) | close: 以收盘价站上均价线为准
     "preview_at": "14:00",     # 尾盘前试算：14:00 后按"截至现在"的均价线先挑出要盯的（空=不启用）
 
@@ -36,7 +36,7 @@ DEFAULT_PARAMS = {
     "auto_limit": 600,         # 自动模式扫描只数（600 只约 20 秒，全市场约 3 分钟）
     "auto_hours": "09:35-15:00",  # 自动盯盘时段，非交易时段不开工
     "auto_every": 300,         # 盘中自动重扫间隔（秒），0 = 不自动轮询
-    "auto_final": "14:50",     # 尾盘终极扫的时刻（给出可直接下单的名单）
+    "auto_final": "14:45",     # 尾盘终极扫的时刻（给出可直接下单的名单）
     "auto_final_enabled": True,
 
     # ---- 筹码低位 ----
@@ -142,8 +142,10 @@ def _norm(params: dict) -> dict:
             p[k] = v if isinstance(v, bool) else str(v).strip().lower() not in ("0", "false", "off", "no", "")
     # 市场状态阈值：上证指数比 MA20 低几个百分点才放行（0~5 之间）
     if "market_gate_pct" in p:
+        # 上限给到 20：阈值越大越保守（要求大盘跌得更狠才买），
+        # 留出空间让人试"只在极端弱势时出手"，别写死 5 挡住
         try:
-            p["market_gate_pct"] = max(0.0, min(5.0, float(p["market_gate_pct"])))
+            p["market_gate_pct"] = max(0.0, min(20.0, float(p["market_gate_pct"])))
         except Exception:
             p["market_gate_pct"] = DEFAULT_PARAMS["market_gate_pct"]
     return p

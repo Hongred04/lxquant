@@ -94,11 +94,48 @@ def _trim():
 
 
 # ---------------------------------------------------------------- 记录
-def save_result(r: dict, date: str | None = None):
+def _tail_prices(codes, hm: str) -> dict:
+    """取这些票当天 hm 时刻的价格（<= hm 的最后一根分时），返回 {code: price}。
+
+    为什么要单独取：盘后（甚至晚上）打开软件时，行情快照给的是**收盘价**，
+    而用户实际是 14:45 下的单。两者差 0.3%~1% 很常见，直接拿收盘价当买入价，
+    回看的涨跌幅就从一开始是错的。取不到就返回空，调用方保持原价。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from . import datasource as ds
+
+    def one(c):
+        try:
+            df = ds.minute_today(c)
+            if df is None or len(df) == 0:
+                return c, None
+            sub = df[df["time"].astype(str) <= hm]
+            if len(sub) == 0:
+                return c, None
+            p = float(sub["price"].iloc[-1])
+            return c, (p if p > 0 else None)
+        except Exception:
+            return c, None
+
+    out = {}
+    try:
+        with ThreadPoolExecutor(max_workers=12) as ex:
+            for c, p in ex.map(one, codes):
+                if p:
+                    out[c] = p
+    except Exception:
+        pass
+    return out
+
+
+def save_result(r: dict, date: str | None = None, force: bool = False):
     """把一次选股结果记下来。
 
-    r 是 screener.run_screen() 的返回值；同一天跑多次（自动选股每 5 分钟一次）
-    只保留"最后一次"，因为最终名单以收盘前那次为准。
+    r 是 screener.run_screen() 的返回值。
+    只有**尾盘定型**（basis == tail）的名单才记账 —— 也就是过了 tail_from（默认 14:45）
+    之后跑出来的那份。这保证了记下来的买入价是"你实际下单那一刻"的价，
+    而不是上午打开软件时随手跑出来的价。
     """
     if not isinstance(r, dict):
         return
@@ -115,6 +152,17 @@ def save_result(r: dict, date: str | None = None):
         return
     date = date or time.strftime("%Y-%m-%d")
     old = _read(date) or {}
+    # 同一天已经有一份「尾盘定型」的名单了，就别再让后面的自动重扫覆盖它。
+    # 你 14:45 下手，而自动扫描还在每 5 分钟跑一次（14:50、14:55…），
+    # 每次都是 tail 口径 —— 一路覆盖下来，记忆里的买入价会变成 14:55 的价，
+    # 回看的涨跌幅跟你实际成交价就对不上了。
+    # 手动点「立即选股」仍然可以强制刷新（force=True），方便名单有误时纠错。
+    if (not force and old.get("basis") == "tail"
+            and stats.get("basis") == "tail"
+            and (old.get("items") or old.get("watch"))):
+        old["runs"] = int(old.get("runs") or 0) + 1
+        _write(date, old)
+        return
     params = stats.get("params") or {}
 
     def _brief(a, gap=None):
@@ -145,11 +193,43 @@ def save_result(r: dict, date: str | None = None):
         gap = sum(1 for k in KEYS if not checks.get(k))
         wl.append(_brief(a, gap))
 
+    items_brief = [_brief(a) for a in items]
+    # 把买入价锚定到「实际下单时刻」＝ tail_from（默认 14:45）。
+    # 盘后甚至晚上才打开软件时，快照里给的是**收盘价**，跟 14:45 的成交价差 0.3%~1%，
+    # 直接存下来会让后面所有回看的涨跌幅从起点就偏。
+    hm = str((stats.get("params") or {}).get("tail_from") or "14:45")
+    price_at = ""
+    if items_brief and len(hm) == 5 and hm[2] == ":":
+        got = _tail_prices([b["code"] for b in items_brief], hm)
+        if got:
+            n_ok = 0
+            for b in items_brief:
+                old_p, new_p = b.get("price"), got.get(b["code"])
+                if not new_p or not old_p:
+                    continue
+                ratio = new_p / old_p
+                b["price"] = round(new_p, 3)
+                # 止损/止盈是按原价算的档位，按同一比例缩放，保持相对关系不变
+                for k in ("stop", "target"):
+                    if isinstance(b.get(k), (int, float)):
+                        b[k] = round(b[k] * ratio, 3)
+                b["price_at"] = hm
+                n_ok += 1
+            # 只有**每一只**都换到了分时价，顶层才敢标「取自 14:45」。
+            # 部分成功（有的票当天停牌、分时取不到）时留空 ——
+            # 否则前端会说"买入价取自 14:45"，实际混着收盘价，看涨跌幅会被误导。
+            price_at = hm if n_ok == len(items_brief) else ""
+
     obj = {
         "date": date,
         "at": r.get("generated_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
         "basis": stats.get("basis") or "",
+        # 买入价取自哪个时刻的分时（空 = 取不到分时，用的快照价）
+        "price_at": price_at,
         "params": {
+            # 记下是哪套策略选的 —— 换过策略之后，不同策略的成绩不能混在一起比。
+            # 之前的记录没这个字段，只能靠时间线猜（见 2026-10-29 的清理）。
+            "strategy": params.get("strategy"),
             "ma_days": params.get("ma_days"),
             "chip_decay": params.get("chip_decay"),
             "profit_cap": params.get("profit_cap"),
@@ -158,7 +238,7 @@ def save_result(r: dict, date: str | None = None):
             "stop_loss": params.get("stop_loss"),
             "take_profit": params.get("take_profit"),
         },
-        "items": [_brief(a) for a in items],
+        "items": items_brief,
         "watch": wl,
         "hit_count": len(items),
         "stats": {
@@ -267,6 +347,7 @@ def _prefetch(codes, memo: dict | None, workers: int = 16):
     from .config import CACHE_DIR
 
     todo = []
+    today = time.strftime("%Y-%m-%d")
     for c in codes:
         if not c:
             continue
@@ -276,7 +357,13 @@ def _prefetch(codes, memo: dict | None, workers: int = 16):
             # 只 stat 文件，不要为了"看一眼有没有"把整个 pickle 反序列化一遍
             p = CACHE_DIR / f"kd_{c}.pkl"
             if p.is_file() and p.stat().st_size > 0:
-                continue
+                # ★ 光判断"文件存在"是不够的：前复权缓存（kd_*.pkl）只在回测 /
+                #   模拟账户里更新，日常选股根本不碰它，所以它可能停在好几天前。
+                #   停在旧日期时，_calc 里的 ds 只剩选出那一天 → days 恒为 0、
+                #   涨跌幅恒为 0%（实测 10-23 选的票，到 10-29 还显示 0 天 0%）。
+                #   用 mtime 判断：不是今天写的就补一次（16 线程并发，百来只约 1.5s）。
+                if time.strftime("%Y-%m-%d", time.localtime(p.stat().st_mtime)) >= today:
+                    continue
         except Exception:
             pass
         todo.append(c)
@@ -424,7 +511,15 @@ def review(date: str | None = None, code: str | None = None, limit: int = 120,
         if not ds:
             return {"date": None, "rows": [], "sum": None, "watch_rows": [],
                     "note": "还没有记录 —— 从今天起，每次选股都会自动记一笔"}
+        # 优先落在「最近一个真选出过票」的那天。
+        # 直接取 ds[0] 会踩到"当天一只没选出"的记录：点进去 KPI 全是「—」、
+        # 表格只有一行「没有票」，看起来像功能坏了，其实只是那天没信号。
         date = ds[0]
+        for d in ds:
+            o = _read(d) or {}
+            if o.get("items"):
+                date = d
+                break
     o = _read(date)
     if not o:
         return {"date": date, "rows": [], "sum": None, "watch_rows": [],
@@ -450,6 +545,8 @@ def review(date: str | None = None, code: str | None = None, limit: int = 120,
         "date": date,
         "at": o.get("at"),
         "basis": o.get("basis"),
+        # 买入价取自哪个时刻的分时（空 = 当时取不到，用的快照价）
+        "price_at": o.get("price_at"),
         "hit": o.get("hit_count", 0),
         "rows": rows,
         "sum": _sum_rows(rows),
@@ -480,21 +577,50 @@ def overview(n: int = 30):
             # 那份名单没定型，不该进总账，但单日页仍然可以点开看
             waiting.append(d)
             continue
-        rv = review(d, memo=memo)
-        allrows = [x for x in (rv["rows"] or []) + (rv.get("watch_rows") or [])
-                   if x.get("ret") is not None and (x.get("days") or 0) > 0]
+        rv = review(d, limit=5000, memo=memo)
+
+        def _graded(rows):
+            """只留下已经走过至少一个交易日的行：days==0 时 then 和 last 是同一根收盘价，
+            涨跌幅恒为 0，混进来只会把成绩往 0 拉。"""
+            return [x for x in rows
+                    if x.get("ret") is not None and (x.get("days") or 0) > 0]
+
+        # 「能买」和「值得买（差一点）」必须**分开算**：
+        # 前者是真正达标的票，后者只是差一两关的观察对象，混在一起算胜率，
+        # 等于用没达标的票去评价规则准不准 —— 既低估也说不清。
+        hitrows = _graded(rv["rows"] or [])
+        watchrows = _graded(rv.get("watch_rows") or [])
+        allrows = hitrows + watchrows
         if not allrows:
             waiting.append(d)
             continue
+
+        def _stat(rows):
+            if not rows:
+                return {"n": 0, "avg": None, "win": None}
+            return {"n": len(rows),
+                    "avg": round(sum(x["ret"] for x in rows) / len(rows), 2),
+                    "win": round(sum(1 for x in rows if x["ret"] > 0) / len(rows) * 100, 1)}
+
+        hs, ws = _stat(hitrows), _stat(watchrows)
         per_day.append({
             "date": d,
+            # total = 当天记了多少只（不与"有没有行情可评"挂钩）
+            # 之前只给了 n，前端把它当"记了几只"显示，于是出现
+            # 「记了 101 只 / 其中能买 117 只」这种自相矛盾的行 —— 两个口径混在一起了。
+            "total": int(o.get("hit_count") or 0) + len(o.get("watch") or []),
             "n": len(allrows),
             "hit": len(rv["rows"] or []),
-            "avg": round(sum(x["ret"] for x in allrows) / len(allrows), 2),
-            "win_rate": round(sum(1 for x in allrows if x["ret"] > 0) / len(allrows) * 100, 1),
-            "days": allrows[0]["days"],
+            # 能买（进总账）
+            "hit_n": hs["n"], "hit_avg": hs["avg"], "hit_win": hs["win"],
+            # 值得买（只看不进总账）
+            "watch_n": ws["n"], "watch_avg": ws["avg"], "watch_win": ws["win"],
+            # 兼容旧字段：一律按「能买」口径，别再让两批混算
+            "avg": hs["avg"], "win_rate": hs["win"],
+            "days": (hitrows or watchrows)[0]["days"],
         })
-        total.extend(allrows)
+        # 总账只累加能买：这批票才代表"规则的信号"
+        total.extend(hitrows)
     s = None
     if total:
         n2 = len(total)

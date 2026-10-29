@@ -117,12 +117,12 @@ def get(key: str | None) -> Strategy:
     """按 key 拿策略实例；拿不到就退回第一个内置的。"""
     if key and key not in _REGISTRY:
         load_user()
-    cls = _REGISTRY.get(key or "") or _REGISTRY.get("ma_cost_low")
+    cls = _REGISTRY.get(key or "") or _REGISTRY.get("oversold_bounce")
     if cls is None and _REGISTRY:
         cls = next(iter(_REGISTRY.values()))
     if cls is None:                                         # 极端兜底：一个都没有
-        from .ma_cost_low import MaCostLow
-        cls = MaCostLow
+        from .oversold_bounce import OversoldBounce
+        cls = OversoldBounce
     return cls()
 
 
@@ -167,7 +167,7 @@ def new_file(name: str = "") -> str:
 
 
 def current_key(params: dict) -> str:
-    return str((params or {}).get("strategy") or "ma_cost_low")
+    return str((params or {}).get("strategy") or "oversold_bounce")
 
 
 def get_current(params: dict) -> Strategy:

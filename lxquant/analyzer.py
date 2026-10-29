@@ -54,7 +54,13 @@ def analyze(code: str, name: str = "", params: dict | None = None,
     last = daily.iloc[-1]
     price = _num(rt["price"]) if rt and rt.get("price") else _num(last["close"])
 
-    avx = ind.daily_avg_price(k5, tail_from=p.get("tail_from", "14:30")) if k5 is not None else pd.DataFrame()
+    # 均价线整只票只算这一次，算完挂到 ctx.shared 上给策略复用。
+    # 以前 analyzer 算一次、策略的 b_streak / b_tail 又各算一次，同一份 416 根
+    # 分钟线被聚合了三遍（实测 2.7ms/次，占单票计算量的 1/4）。
+    # 这里一律带 minutes：策略里的 tail_preview（14:00 提前试算）要用它。
+    avx = (ind.daily_avg_price(k5, tail_from=p.get("tail_from", "14:30"),
+                               with_minutes=True)
+           if k5 is not None else pd.DataFrame())
     streak = ind.consecutive_above(avx, ma_days, ma_ratio, ma_tol)
     # 尾盘口径：不看收盘价，而是看 14:30 的价 vs 截至 14:30 的均价线
     tail_w = ind.tail_window_stats(avx, ma_days, str(p.get("tail_from", "14:30")), ma_ratio)
@@ -106,7 +112,17 @@ def analyze(code: str, name: str = "", params: dict | None = None,
     # 所有的判定都交给策略插件：实盘和回测共用同一份 gate，
     # 不会出现"回测在测 A、实盘在下 B"
     strat = strats.get_current(p)
-    ctx = strats.Ctx(code, name, daily, k5=k5, rt=rt)
+    # 把已经算过的中间结果一并交给策略：streak / tail_w / preview 这三样
+    # 策略的 b_streak、b_tail 里还会再算一遍（同一份分钟线、同一套参数），
+    # 复用它俩能省掉每只票 2 次 consecutive_above + 2 次 tail_window_stats。
+    _w = dict(tail_w) if isinstance(tail_w, dict) else tail_w
+    if isinstance(_w, dict):
+        _w["preview"] = tail_pv
+    # pos / bottom 也一并复用：price_position 与 bottom_structure 内部都自己
+    # 按窗口切片，所以传全量日线和传切片结果相同，可以安全共享。
+    ctx = strats.Ctx(code, name, daily, k5=k5, rt=rt,
+                     shared={"avx": avx, "streak": streak, "tail_w": _w,
+                             "pos": pos, "bottom": bot, "chip": chip})
     facts = strat.facts(ctx, p)
     checks, gate_rows = strat.check_all(facts, ctx, p)
     bot = facts.get("bottom") or {"ok": False, "amp": None, "slope": None,
