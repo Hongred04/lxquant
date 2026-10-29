@@ -344,26 +344,39 @@ def _prefetch(codes, memo: dict | None, workers: int = 16):
     """
     from concurrent.futures import ThreadPoolExecutor
 
+    from . import store
     from .config import CACHE_DIR
 
-    todo = []
     today = time.strftime("%Y-%m-%d")
+    # 「此刻应该覆盖到的最后一个交易日」。收盘后就是今天；
+    # 盘中/开盘前要放宽，否则今天这根还没吐出来，每次都会重拉一遍。
+    try:
+        want = store._want_date()
+    except Exception:
+        want = today
+
+    todo = []
     for c in codes:
         if not c:
             continue
         if memo is not None and c in memo:
             continue
+        p = CACHE_DIR / f"kd_{c}.pkl"
+        if not p.is_file() or p.stat().st_size <= 0:
+            todo.append(c)
+            continue
+        # ★ 判断依据必须是**数据本身的最后一根**，不能是文件 mtime。
+        #   mtime 只说明"今天写过这个文件"，不代表里面装的是今天的数据：
+        #   2026-10-29 实测，09:03 那次刷新写进去的最后一根是 10-28，
+        #   之后腾讯前复权接口整片 501，文件再没更新过 —— mtime 却一直算"今天"，
+        #   于是这里永远跳过、回看永远 days=0 / 0%，界面看起来像「都没收盘」。
         try:
-            # 只 stat 文件，不要为了"看一眼有没有"把整个 pickle 反序列化一遍
-            p = CACHE_DIR / f"kd_{c}.pkl"
-            if p.is_file() and p.stat().st_size > 0:
-                # ★ 光判断"文件存在"是不够的：前复权缓存（kd_*.pkl）只在回测 /
-                #   模拟账户里更新，日常选股根本不碰它，所以它可能停在好几天前。
-                #   停在旧日期时，_calc 里的 ds 只剩选出那一天 → days 恒为 0、
-                #   涨跌幅恒为 0%（实测 10-23 选的票，到 10-29 还显示 0 天 0%）。
-                #   用 mtime 判断：不是今天写的就补一次（16 线程并发，百来只约 1.5s）。
-                if time.strftime("%Y-%m-%d", time.localtime(p.stat().st_mtime)) >= today:
-                    continue
+            df = store.get_kline_cached(c, "day")
+            last = ""
+            if df is not None and len(df):
+                last = str(df["date"].iloc[-1])[:10] if "date" in df.columns else ""
+            if last and last >= want:
+                continue
         except Exception:
             pass
         todo.append(c)
@@ -371,7 +384,6 @@ def _prefetch(codes, memo: dict | None, workers: int = 16):
         return
 
     def _one(c):
-        from . import store
         try:
             store.get_kline(c, "day", 640)
         except Exception:
@@ -585,13 +597,27 @@ def overview(n: int = 30):
             return [x for x in rows
                     if x.get("ret") is not None and (x.get("days") or 0) > 0]
 
+        # 当天选出、但买入价取自 14:45 分时的：then 和 last 是两个不同的价，
+        # ret 是"尾盘买入 → 收盘"的真实盈亏，不是 0。
+        # 这一类**要显示**（否则收盘后打开，成绩单最后一行还停在昨天，
+        # 看起来像今天根本没出结果），但**不进总账** —— 一天的走势代表不了
+        # 这套规则准不准，混进累计胜率会把结论拉偏。
+        today_px = bool(rv.get("price_at"))
+
+        def _same_day(rows):
+            return [x for x in rows
+                    if x.get("ret") is not None and (x.get("days") or 0) <= 0]
+
         # 「能买」和「值得买（差一点）」必须**分开算**：
         # 前者是真正达标的票，后者只是差一两关的观察对象，混在一起算胜率，
         # 等于用没达标的票去评价规则准不准 —— 既低估也说不清。
         hitrows = _graded(rv["rows"] or [])
         watchrows = _graded(rv.get("watch_rows") or [])
+        # 当天口径（days=0）的行，仅在有真实买入时点时才拿出来展示
+        t_hit = _same_day(rv["rows"] or []) if today_px else []
+        t_watch = _same_day(rv.get("watch_rows") or []) if today_px else []
         allrows = hitrows + watchrows
-        if not allrows:
+        if not allrows and not (t_hit or t_watch):
             waiting.append(d)
             continue
 
@@ -603,23 +629,34 @@ def overview(n: int = 30):
                     "win": round(sum(1 for x in rows if x["ret"] > 0) / len(rows) * 100, 1)}
 
         hs, ws = _stat(hitrows), _stat(watchrows)
+        # 当天还没走完：用它自己的「尾盘→收盘」口径
+        ths, tws = _stat(t_hit), _stat(t_watch)
+        partial = not allrows
         per_day.append({
             "date": d,
             # total = 当天记了多少只（不与"有没有行情可评"挂钩）
             # 之前只给了 n，前端把它当"记了几只"显示，于是出现
             # 「记了 101 只 / 其中能买 117 只」这种自相矛盾的行 —— 两个口径混在一起了。
             "total": int(o.get("hit_count") or 0) + len(o.get("watch") or []),
-            "n": len(allrows),
+            "n": len(allrows) if not partial else len(t_hit) + len(t_watch),
             "hit": len(rv["rows"] or []),
             # 能买（进总账）
-            "hit_n": hs["n"], "hit_avg": hs["avg"], "hit_win": hs["win"],
+            "hit_n": hs["n"] if not partial else ths["n"],
+            "hit_avg": hs["avg"] if not partial else ths["avg"],
+            "hit_win": hs["win"] if not partial else ths["win"],
             # 值得买（只看不进总账）
-            "watch_n": ws["n"], "watch_avg": ws["avg"], "watch_win": ws["win"],
+            "watch_n": ws["n"] if not partial else tws["n"],
+            "watch_avg": ws["avg"] if not partial else tws["avg"],
+            "watch_win": ws["win"] if not partial else tws["win"],
             # 兼容旧字段：一律按「能买」口径，别再让两批混算
-            "avg": hs["avg"], "win_rate": hs["win"],
-            "days": (hitrows or watchrows)[0]["days"],
+            "avg": hs["avg"] if not partial else ths["avg"],
+            "win_rate": hs["win"] if not partial else ths["win"],
+            "days": (hitrows or watchrows)[0]["days"] if not partial else 0,
+            # 这一天还没走完（当天选、当天回看）：数字是"尾盘→收盘"，不是多日走势
+            "partial": partial,
+            "price_at": rv.get("price_at") if partial else None,
         })
-        # 总账只累加能买：这批票才代表"规则的信号"
+        # 总账只累加能买：这批票才代表"规则的信号"（当天的 partial 行不进）
         total.extend(hitrows)
     s = None
     if total:

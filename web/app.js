@@ -10,6 +10,12 @@ const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(+v)) ? 
 const pct = (v, d = 2) => (v === null || v === undefined || Number.isNaN(+v)) ? '—' : (+v).toFixed(d) + '%';
 const cls = v => (+v > 0 ? 'up' : +v < 0 ? 'down' : '');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/** 今天（本地时区），YYYY-MM-DD。用来判断某条记录是不是"当天"的。 */
+function todayStr() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 function toast(msg, isErr) {
   const t = $('#toast');
@@ -1367,12 +1373,57 @@ function renderMemEmpty(txt) {
   ['#mem-kpis', '#mem-row2', '#mem-table', '#mem-days'].forEach(s => { const el = $(s); if (el) el.hidden = true; });
 }
 
+/** 这一天有记录，但当前筛选下没票（最常见：那天一只「能买」都没选出）。
+ *
+ *  要跟「今天还没收盘」严格区分开 —— 这两件事以前共用一条提示，
+ *  结果 10-28 这种历史日期也会说「这天是今天，日线还没出来」。
+ *  区别在于：本函数的情况**已经有完整数据**，只是"筛选后为空"，
+ *  所以要把话说明白，并给一个就地切换筛选的按钮，别让人以为软件坏了。
+ */
+function renderMemNoPick(rv) {
+  const b0 = $('#mem-loading'); if (b0) b0.hidden = true;
+  ['#mem-kpis', '#mem-row2', '#mem-table'].forEach(s => { const el = $(s); if (el) el.hidden = true; });
+  const box = $('#mem-empty'); if (box) box.hidden = false;
+
+  const nHit = (rv.rows || []).length;
+  const nWatch = (rv.watch_rows || []).length;
+  const b = $('#mem-empty-txt');
+  const title = box.querySelector('b');
+  const srcTxt = MEM.src === 'watch' ? '值得盯着' : (MEM.src === 'hit' ? '能买' : '全部');
+  if (title) {
+    title.textContent = nHit === 0 && nWatch > 0
+      ? `${MEM.date} 这天没有「能买」的票`
+      : `这一条筛选下没有票`;
+  }
+  if (b) {
+    b.innerHTML = (nHit === 0 && nWatch > 0)
+      ? `那天只留下了 ${nWatch} 只「值得盯着」的（差一两关），没有一只全部达标 —— `
+        + `这是规则主动不出手，不是数据没出来。`
+        + `<button class="btn sm ghost" id="mem-goto-watch" style="margin-left:8px">看那 ${nWatch} 只</button>`
+      : `当前看的是「${srcTxt}」，这天这一类是空的。`;
+  }
+  // 「看那 N 只」——就地切到观察名单，不要让用户自己去猜下拉框
+  const go = $('#mem-goto-watch');
+  if (go) go.onclick = () => {
+    MEM.src = 'watch';
+    const s = $('#mem-src'); if (s) s.value = 'watch';
+    renderMemory();
+  };
+}
+
 function renderMemory() {
   const rv = MEM.rv;
   const items = memFiltered();
   if (!rv || (!items.length)) {
     const has = !!(rv && ((rv.rows || []).length || (rv.watch_rows || []).length));
     if (!has) { renderMemEmpty(); return; }
+    // 这一天有记录，但**当前这个筛选**下没有票。
+    // 最常见的场景：那天一只「能买」都没选出，只有观察票，而默认筛选是「只看能买的」。
+    // 以前这里会掉进下面 n=0 的分支，弹出「这天是今天，日线还没出来」——
+    // 明明是 10-28 的历史记录、明明有 30 只观察票，提示却说"是今天、在等收盘"，
+    // 两句话都是错的，还会让人以为软件坏了。
+    renderMemNoPick(rv);
+    return;
   }
   const rows = items.filter(x => x.ret != null);
   const pend = items.filter(x => x.ret == null);
@@ -1382,9 +1433,21 @@ function renderMemory() {
 
   // ---- 上面那张成绩单
   const n = rows.length;
-  // 全是"当天选出、当天回看"的（days=0）：那时买价和收盘价是同一根，
-  // 涨跌幅恒等于 0，显示成 0.00% 会让人以为"这批一动不动"，其实还没开始走
+  // days=0 分两种情况，必须区别对待：
+  //  a) 买入价用的是**收盘价**（price_at 为空）→ then 和 last 是同一根，ret 恒为 0，
+  //     显示 0.00% 会让人以为"这批一动不动"，其实还没开始走 → 打「—」；
+  //  b) 买入价取自 **14:45 分时**（price_at 有值）→ then 和 last 是两个不同的价，
+  //     ret 就是"尾盘买入到收盘"的真实当日盈亏，属于有效信息 → 照常显示。
+  // 以前一律按 a) 处理（只看 days），于是当天选出的记录 KPI 全是「—」，
+  // 收盘后打开会以为软件今天没出结论 —— 实际是把这个结论藏起来了。
+  const todayPx = n > 0 && !!String((rv && rv.price_at) || '');
   const onlyToday = n > 0 && rows.every(x => (x.days || 0) <= 0);
+  // 这一天的数字算不算"有效结论"：走过了后面的行情，或者至少是真实的尾盘买入价
+  const effective = n > 0 && (!onlyToday || todayPx);
+  // 这条记录是不是"当天"（而不是翻出来的历史某天）。
+  // 判断依据只能是记录日期与今天是否相同 —— 以前用 days==0 反推，
+  // 于是历史某天（比如 10-28）只要涨跌幅算不出来，也会被说成"这天是今天，还在等收盘"。
+  const isToday = String(MEM.date || '') === todayStr();
   const win = rows.filter(x => x.ret > 0).length;
   const avg = n ? rows.reduce((a, b) => a + b.ret, 0) / n : 0;
   const best = n ? rows.reduce((a, b) => (b.ret > a.ret ? b : a)) : null;
@@ -1397,22 +1460,42 @@ function renderMemory() {
       s: rows.length ? `${rows.length} 只有收盘价，${pend.length ? `还有 ${pend.length} 只` : '全部'}能算` : '都在等收盘价',
     },
     {
-      k: '到今天平均', v: (n && !onlyToday) ? (avg > 0 ? '+' : '') + fmt(avg, 2) + '%' : '—',
-      s: onlyToday ? '当天就回看，等于还没开始走' : `${MEM.date} → 今天，前复权算的`,
-      c: (n && !onlyToday) ? (avg >= 0 ? 'up' : 'down') : '',
+      // 当天上市（days=0）但买价是 14:45 时，"到今天平均"其实是"当天尾盘到收盘"
+      k: (onlyToday && todayPx) ? '尾盘买 → 收盘' : '到今天平均',
+      v: effective ? (avg > 0 ? '+' : '') + fmt(avg, 2) + '%' : '—',
+      // 副标题只说"按哪个价算的"。日期在选择器和明细表抬头都有了，标题也已经写明
+      // 「尾盘买 → 收盘」，这里再重复一遍"2026-10-29 14:45 买入价 → 收盘价"
+      // 会被 .kpi .s 的省略号截掉半句（实测溢出 5px），看着像布局坏了。
+      s: effective
+        ? (onlyToday ? `按 ${rv.price_at} 分时价算` : '前复权算的')
+        : '还没开始走',
+      c: effective ? (avg >= 0 ? 'up' : 'down') : '',
     },
-    { k: '赚钱的几只', v: (n && !onlyToday) ? `${win} / ${n}` : '—', s: (n && !onlyToday) ? `占 ${pct(win / n * 100, 0)}` : '还没有数据', c: (n && !onlyToday) ? (win * 2 >= n ? 'up' : 'down') : '' },
-    { k: '最好的一只', v: (best && !onlyToday) ? '+' + fmt(best.ret, 1) + '%' : '—', s: (best && !onlyToday) ? esc(best.name) : '', c: (best && !onlyToday) ? 'up' : '' },
-    { k: '最差的一只', v: (worst && !onlyToday) ? (worst.ret > 0 ? '+' : '') + fmt(worst.ret, 1) + '%' : '—', s: (worst && !onlyToday) ? esc(worst.name) : '', c: (worst && !onlyToday) ? (worst.ret < 0 ? 'down' : 'up') : '' },
-    { k: '摸到止盈 / 破止损', v: (n && !onlyToday) ? `${hitT} / ${hitS}` : '—', s: '按软件当时给的价位算', c: '' },
+    { k: '赚钱的几只', v: effective ? `${win} / ${n}` : '—', s: effective ? `占 ${pct(win / n * 100, 0)}` : '还没有数据', c: effective ? (win * 2 >= n ? 'up' : 'down') : '' },
+    { k: '最好的一只', v: (best && effective) ? (best.ret > 0 ? '+' : '') + fmt(best.ret, 1) + '%' : '—', s: (best && effective) ? esc(best.name) : '', c: (best && effective) ? (best.ret > 0 ? 'up' : 'down') : '' },
+    { k: '最差的一只', v: (worst && effective) ? (worst.ret > 0 ? '+' : '') + fmt(worst.ret, 1) + '%' : '—', s: (worst && effective) ? esc(worst.name) : '', c: (worst && effective) ? (worst.ret < 0 ? 'down' : 'up') : '' },
+    { k: '摸到止盈 / 破止损', v: effective ? `${hitT} / ${hitS}` : '—', s: '按软件当时给的价位算', c: '' },
   ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c}">${x.v}</div><div class="s">${x.s}</div></div>`).join('');
 
   // ---- 右上角那段话
   const say = [];
   if (!n) {
-    say.push(['还在等收盘', '这天是今天，日线还没出来。等收盘（或明天）再回来看，就有涨跌幅了。']);
+    // 这里 n=0 是"这一类筛选下没有能算的行"，不一定等于"还没收盘"。
+    // 只有记录日期确实是今天才说等收盘；历史某天算不出来，通常是那天没选出票。
+    if (isToday) {
+      say.push(['还在等收盘', '这天是今天，日线还没出来。等收盘（或明天）再回来看，就有涨跌幅了。']);
+    } else {
+      say.push(['这天没有可算的票', `${MEM.date} 这一条筛选下没有票，所以没有涨跌幅可看。换一个筛选看看，或者换一天。`]);
+    }
+  } else if (onlyToday && todayPx) {
+    // 当天就能给出结论：唯一能算的是"尾盘买入到收盘"这一段
+    if (avg >= 1) say.push(['尾盘买进，收盘还是赚的', `平均 +${fmt(avg, 2)}%，${n} 只里 ${win} 只收盘比买入价高。`]);
+    else if (avg <= -1) say.push(['尾盘买进，收盘就浮亏', `平均 ${fmt(avg, 2)}%，${n} 只里只有 ${win} 只守住买入价。`]);
+    else say.push(['尾盘买进，收盘基本平', `平均 ${fmt(avg, 2)}%，${n} 只里 ${win} 只收在买入价之上。`]);
+    say.push(['这只是当天的那一段', `买入价取自 ${MEM.date} ${rv.price_at} 的分时，所以能算出"尾盘到收盘"的真实盈亏。但一天的走势代表不了这套规则准不准 —— 要等它走完几天，才谈得上判断。`]);
+    if (hitS) say.push(['已经有票破位', `${hitS} 只跌破了当时给的止损价。按纪律该走就走，别扛。`]);
   } else if (onlyToday) {
-    say.push(['今天刚选出来', `这一批是 ${MEM.date} 收盘后回看的，买价和当天收盘价是同一个，涨跌幅本来就是 0。明天起才有真正的走势可看。`]);
+    say.push(['今天刚选出来', `这一批是 ${MEM.date} 回看的，买入价和当天收盘价是同一个，涨跌幅本来就是 0。明天起才有真正的走势可看。`]);
     say.push(['别拿这一天当结论', '只有走过了后面的行情，才谈得上"选得准不准"。当天的 0% 不进总账 —— 记忆页统计里已经把它排除了。']);
   } else {
     if (avg >= 3) say.push(['这批是赚的', `平均 +${fmt(avg, 2)}%，${n} 只里 ${win} 只赚钱。`]);
@@ -1447,6 +1530,12 @@ function renderMemory() {
   TB.innerHTML = items.map(x => {
     const kind = memKindOf(x);
     const retCls = x.ret == null ? '' : (x.ret > 0 ? 'up' : (x.ret < 0 ? 'down' : ''));
+    // 带符号的百分比：正数补 +，负数让 fmt 自己带 -。
+    // 以前这里写死 '+' + fmt(...)，最高价那一列在整段都在跌的时候会渲染成
+    // 「+-0.23%」这种一眼就能看出是 bug 的东西；颜色也写死了 up/down，
+    // 明明跌了还是绿的（A 股跌是绿，但"最高到过"是负的就不该显示成涨的色）。
+    const sgnPct = (v, d) => (v == null ? '—' : (v > 0 ? '+' : '') + fmt(v, d) + '%');
+    const dirCls = (v) => (v == null ? '' : (v > 0 ? 'up' : (v < 0 ? 'down' : '')));
     return `<tr data-code="${esc(x.code)}">
       <td class="code">${esc(x.code)}</td>
       <td class="name">${esc(x.name || '')}</td>
@@ -1454,8 +1543,8 @@ function renderMemory() {
       <td class="num">${x.then == null ? '—' : fmt(x.then)}</td>
       <td class="num">${x.last == null ? '—' : fmt(x.last)}</td>
       <td class="num ${retCls}">${x.ret == null ? '等收盘' : (x.ret > 0 ? '+' : '') + fmt(x.ret, 2) + '%'}</td>
-      <td class="num up">${x.best == null ? '—' : '+' + fmt(x.best, 2) + '%'}</td>
-      <td class="num down">${x.worst == null ? '—' : fmt(x.worst, 2) + '%'}</td>
+      <td class="num ${dirCls(x.best)}">${sgnPct(x.best, 2)}</td>
+      <td class="num ${dirCls(x.worst)}">${sgnPct(x.worst, 2)}</td>
       <td class="num">${x.days == null ? '—' : x.days}</td>
       <td>${x.stop ? `止损 ${fmt(x.stop)}` : ''}${x.stop && x.target ? ' / ' : ''}${x.target ? `止盈 ${fmt(x.target)}` : ''}${!x.stop && !x.target ? '—' : ''}</td>
     </tr>`;
@@ -1478,15 +1567,22 @@ function renderMemory() {
       // 免得又出现「记了 101、其中能买 117」这种自相矛盾的行
       const tot = d.total != null ? d.total : Math.max(d.n || 0, d.hit || 0);
       const hn = d.hit_n != null ? d.hit_n : d.hit;
-      return `<tr data-date="${d.date}">
-      <td>${d.date}</td>
+      // partial：这天还没走完（当天选出、当天回看）。
+      // 数字是"14:45 买入 → 收盘"，是真的，但只代表当天那一段，
+      // 所以标出来、并且不计入下面的累计胜率。
+      const pt = !!d.partial;
+      const tag = pt
+        ? `<em class="ts" title="这天还没走完：数字是 ${esc(d.price_at || '尾盘')} 买入到当天收盘的盈亏，不计入累计胜率">当天 · 未走完</em>`
+        : '';
+      return `<tr data-date="${d.date}"${pt ? ' class="pt"' : ''}>
+      <td>${d.date}${tag}</td>
       <td class="num" title="当天共记 ${tot} 只，其中 ${d.n} 只已走过至少一个交易日，参与下面的涨跌统计">${tot}</td>
       <td class="num" title="当天全部达标的票">${hn}</td>
       <td class="num ${cls(d.hit_avg)}">${sgn(d.hit_avg)}</td>
       <td class="num">${wr(d.hit_win)}</td>
       <td class="num ${cls(d.watch_avg)}" title="差一两关的观察票，只作参考、不计入总胜率">${sgn(d.watch_avg)}</td>
       <td class="num">${wr(d.watch_win)}</td>
-      <td class="num">${d.days}</td>
+      <td class="num">${pt ? '—' : d.days}</td>
     </tr>`;
     }).join('') + waitTip;
   } else {

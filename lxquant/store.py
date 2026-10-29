@@ -347,10 +347,23 @@ def get_kline(code, period: str = "day", count: int = 640, force=False):
     try:
         df = ds.tencent_kline(code, period, count)
     except Exception:
-        if p.exists():
-            return _load(p)            # 拉不到就用旧缓存兜底，宁可晚一天也别画不出图
+        # 腾讯 fqkline 会长期整片 501（2026-10-29 实测连续 5 次、
+        # 直连和走代理都一样，不是限流）。此时**不能直接退回旧缓存**：
+        # 旧缓存停在几天前，回看涨跌会算出 days=0、0%，界面上一片「等收盘」，
+        # 看起来像功能坏了，其实只是数据没跟上。
+        # 日线有现成的前复权替代口径（新浪不复权 × 新浪复权因子，见 daily_long），
+        # 先用它顶上；周月线拼不出来，只能退回旧缓存。
         if period == "day":
-            return get_daily(code, min(int(count), 300))   # 腾讯挂了退回新浪日线
+            try:
+                df = ds.daily_long(code, max(int(count), 640))
+                _dump(df, p)
+                return df
+            except Exception:
+                pass
+        if p.exists():
+            return _load(p)            # 前复权也拿不到：旧缓存兜底，宁可晚一天也别画不出图
+        if period == "day":
+            return get_daily(code, min(int(count), 300))   # 全挂了退回不复权日线
         raise
     _dump(df, p)
     return df
