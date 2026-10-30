@@ -18,10 +18,12 @@ python run.py
 | --- | --- |
 | `run.py` | 启动入口（起 HTTP 服务 + 自动选股线程） |
 | `lxquant/` | 后端：数据源、指标、筹码分布、五关筛选、回测、模拟账户、自选股提醒、选股记忆 |
-| `web/` | 前端：纯 HTML/CSS/JS，无框架、无构建步骤，改完刷新就生效 |
+| `web/` | 前端：纯 HTML/CSS/JS，无框架；**改了要构建**，见下 |
 | `data/` | 配置、演示数据、记忆（行情缓存 `data/cache/` 不进库，会自动重下） |
 | `runtime/` | 自带的 Python 运行时，不进库 |
-| `tools/` | 构建脚本：把前端压成 `.min` 产物（可选） |
+| `tools/` | `build.js` 压缩前端；`check.py` 一键自检（语法 + 测试 + 构建） |
+| `tests/` | 纯标准库单测，`runtime/python.exe -m tests.run` |
+| `AGENTS.md` | 给 AI / 接手的开发约定和已知的坑 |
 
 ## 界面
 
@@ -34,17 +36,29 @@ python run.py
 
 `data/cache/`（500MB+ 行情缓存，删除后自动重新下载）、`data/export/`（导出文件）、`runtime/`（Python 运行时）、`data/watchlist.json` 与 `data/memory/`（本机私有的自选与记忆记录）—— 完整清单见 `.gitignore`。
 
-## 构建（可选，只为让页面更快）
+## 改完代码怎么验证
 
-前端是纯 HTML/CSS/JS，改完直接刷新就生效，**不需要构建**。想让首屏下载更小可以跑：
+```
+./runtime/python.exe tools/check.py
+```
+
+语法、单测、前端语法、构建新鲜度一次查完，有 FAIL 会直接说哪里不对。
+
+**改了 `web/app.js` 或 `web/style.css` 必须重建**（约 1 秒）：
 
 ```
 node tools/build.js
 ```
 
-它会生成 `web/app.min.js` 和 `web/style.min.css`（只删注释和多余空白，不改逻辑）。
-服务端 `lxquant/server.py` 的 `_static()` 看到同名 `.min` 产物就优先发压缩版，
-并且对 js/css/html 统一 gzip。实测首屏 JS 从 161 KB 降到约 40 KB（-75%）。
+原因：仓库里已经有 `.min` 产物，服务端 `_static()` 看到同名 `.min` 就**优先发压缩版**。
+只改源文件不重建，刷新页面看到的是旧代码 —— 这个坑很容易误判成"改了没用"。
+`tools/check.py` 会检查这一点，加 `--fix` 可以顺手重建。
 
-调试时想回源码：地址后加 `?raw=1`，例如 `/app.js?raw=1`。
-没装 node 也能正常用，服务端发现没有 `.min` 文件就发源码。
+调试时想看源码版：地址后加 `?raw=1`，例如 `/app.js?raw=1`。
+机器上没装 node 也能跑：把 `web/*.min.js`、`web/*.min.css` 删掉，服务端就发源码。
+压缩只删注释和多余空白、不重命名变量，实测首屏 JS 从 161 KB 降到约 40 KB（-75%）。
+
+## 开发约定
+
+改之前先看 **[AGENTS.md](AGENTS.md)**：数据口径（哪些缓存是前复权）、账本保护规则、
+已知的外部接口坑（腾讯三入口、qfq 等差负价）都在里面，能省掉大半排查时间。

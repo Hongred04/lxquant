@@ -572,6 +572,17 @@ td em.ts{
 }
 .c-act{width:56px}
 tr.empty td{text-align:center;color:var(--txt-3);padding:26px 0!important;cursor:default}
+/* 成绩单为空时的说明块：两行、左对齐。
+   只给一句「明天起就会有」时，已经记了几天的人会以为功能坏了 ——
+   这里要放确切数字，所以字号比普通空状态小一点，别喧宾夺主。 */
+.mem-none{display:flex;flex-direction:column;gap:5px;padding:4px 18px;text-align:left}
+.mem-none b{color:var(--txt-2);font-size:12.5px;font-weight:600}
+.mem-none span{color:var(--txt-3);font-size:12px;line-height:1.7}
+/* 累计还是空的时候，表格底下那句"差在哪"：
+   左对齐、不居中，读起来像注释而不是报错。 */
+tr.foot-none td{text-align:left!important;color:var(--txt-3);font-size:12px;
+  line-height:1.75;padding:10px 2px 4px!important;border-top:1px dashed var(--line)}
+tr.foot-none .muted{display:inline-block;margin-top:3px}
 tr.empty:hover{background:transparent!important}
 .up{color:var(--up)!important} .down{color:var(--down)!important}
 

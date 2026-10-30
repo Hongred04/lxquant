@@ -1579,17 +1579,28 @@ function renderMemory() {
   const wr = v => (v == null ? '—' : pct(v, 0));
   const cls = v => (v == null ? '' : (v > 0 ? 'up' : (v < 0 ? 'down' : '')));
   if (ov && (ov.days || []).length) {
-    TB2.innerHTML = ov.days.map(d => {
+    const today = todayStr();
+    // 「能买」的票还没走过一个完整交易日的，都算不出胜率。给个数出来，
+    // 否则整张表一片「—」会被读成功能坏了。
+    const withHit = (ov.days || []).filter(d => (d.hit || 0) > 0);
+    const nHit = withHit.reduce((a, d) => a + (d.hit || 0), 0);
+    const scored = (ov.days || []).filter(d => !d.partial && (d.days || 0) > 0 && (d.hit_n || 0) > 0).length;
+    const rows = ov.days.map(d => {
       // 当天记的总只数（含还没走完一天的）；老记录没有 total 字段时用 n/hit 取大者兜底，
       // 免得又出现「记了 101、其中能买 117」这种自相矛盾的行
       const tot = d.total != null ? d.total : Math.max(d.n || 0, d.hit || 0);
       const hn = d.hit_n != null ? d.hit_n : d.hit;
-      // partial：这天还没走完（当天选出、当天回看）。
-      // 数字是"14:45 买入 → 收盘"，是真的，但只代表当天那一段，
-      // 所以标出来、并且不计入下面的累计胜率。
+      // partial：这天的「能买」票还没有一根走完的收盘价。
+      //   · 就是今天  → 「当天 · 未走完」，数字是"尾盘买→收盘"，不进累计
+      //   · 是前几天  → 不能写"当天"（10-29 的标签挂在 10-30 的页面上是错的），
+      //                应说"等次日收盘"：次日的日线还没出来
       const pt = !!d.partial;
+      const isToday = d.date === today;
       const tag = pt
-        ? `<em class="ts" title="这天还没走完：数字是 ${esc(d.price_at || '尾盘')} 买入到当天收盘的盈亏，不计入累计胜率">当天 · 未走完</em>`
+        ? `<em class="ts" title="${esc(isToday
+              ? `这天还没走完：数字是 ${d.price_at || '尾盘'} 买入到当天收盘的盈亏，不计入累计胜率`
+              : '这天的票还没走过一个完整交易日（次日收盘价还没出来），所以暂时不计入累计胜率')}">`
+          + `${isToday ? '当天 · 未走完' : '等次日收盘'}</em>`
         : '';
       return `<tr data-date="${d.date}"${pt ? ' class="pt"' : ''}>
       <td>${d.date}${tag}</td>
@@ -1601,11 +1612,43 @@ function renderMemory() {
       <td class="num">${wr(d.watch_win)}</td>
       <td class="num">${pt ? '—' : d.days}</td>
     </tr>`;
-    }).join('') + waitTip;
+    }).join('');
+    // 累计还是空的时候，说明「差在哪、还差多少」——比让用户自己猜强
+    const NEED = 20;
+    let foot = '';
+    if (!ov.sum) {
+      const why = !withHit.length
+        ? '这几天都没有「能买」的票 —— 规则没给出信号，就没有对错可评（观察票不进统计）。'
+        : `记了 ${withHit.length} 天有「能买」的票，共 ${nHit} 只，但还没有一只走过完整的下一个交易日，`
+          + `所以累计胜率还是空的。收完今天的盘就会有第一笔。`;
+      foot = `<tr class="foot-none"><td colspan="8">${esc(why)}`
+        + `<br><span class="muted">谈胜率至少要 ${NEED} 个交易日，目前 ${scored}/${NEED}。</span></td></tr>`;
+    }
+    TB2.innerHTML = rows + waitTip + foot;
   } else {
-    TB2.innerHTML = (waitDays.length
-      ? `<tr class="empty"><td colspan="8">${waitDays.map(esc).join('、')} 还没走完一个交易日（或只是盘中试算），明天起就会有成绩</td></tr>`
-      : '<tr class="empty"><td colspan="8">还没有足够的记录 —— 明天起就会有</td></tr>');
+    // 空成绩单最容易被读成「功能坏了」——尤其已经记了几天、却还是一片空的时候。
+    // 所以把确切数字摆出来：记了几天、其中几天有「能买」的票、为什么还算不出胜率、
+    // 还差多少。一句「明天起就会有」在已经记了两天的时候是错的。
+    const rec = (ov && ov.days) || [];
+    const withHit = rec.filter(d => (d.hit || 0) > 0);
+    const nHit = withHit.reduce((a, d) => a + (d.hit || 0), 0);
+    const NEED = 20;                       // 20 个交易日起步，才谈得上胜率
+    let head, sub;
+    if (!rec.length) {
+      head = '还没有任何记录';
+      sub = '今天 14:45 之后（或明天开盘）会自动记下第一份名单，之后每天一行。';
+    } else if (!withHit.length) {
+      head = `已记 ${rec.length} 天，但这几天都没有「能买」的票`;
+      sub = '只有观察票不算成绩 —— 规则没给出信号，就没有对错可评。';
+    } else {
+      head = `已记 ${rec.length} 天，其中 ${withHit.length} 天有「能买」的票，共 ${nHit} 只`;
+      sub = '这些票还没有一只走过完整的下一个交易日，所以现在算不出胜率；'
+          + '等收盘（或明天）就有第一笔成绩。'
+          + `要谈胜率至少要 ${NEED} 个交易日，目前 ${withHit.length}/${NEED}。`;
+    }
+    if (waitDays.length) sub += ` ${waitDays.map(esc).join('、')} 还在等收盘。`;
+    TB2.innerHTML = `<tr class="empty"><td colspan="8"><div class="mem-none">`
+      + `<b>${esc(head)}</b><span>${sub}</span></div></td></tr>`;
   }
 
   paintMemChart();
