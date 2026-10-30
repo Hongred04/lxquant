@@ -284,35 +284,104 @@ def _tencent_kline(sym: str, scale: str, count: int) -> list:
     return []
 
 
+# 腾讯 K 线的三个入口 —— 数据完全一样，但**可用性是独立波动的**。
+# 2026-10-29 遇到过 ifzq.gtimg.cn 连续 5 次 501（直连、代理、换 UA 都一样），
+# 第二天又全好了 —— 说明那是单入口限流/临时封禁，不是接口下线。
+# 只挂死一个域名的做法，会在这种时候把整片功能打成"数据没跟上"。
+# 轮换策略：按「上次成功的入口」优先，失败就换下一个，全会才报错。
+TENCENT_HOSTS = (
+    "https://ifzq.gtimg.cn",
+    "https://web.ifzq.gtimg.cn",
+    "https://proxy.finance.qq.com/ifzqgtimg",
+)
+_TENCENT_PREF = [0]        # 上次成功的入口下标（进程内记忆，省掉无谓的试错）
+
+
+def _tencent_order() -> list:
+    """按「上次成功优先」排出这一轮要试的入口顺序。"""
+    n = len(TENCENT_HOSTS)
+    p = _TENCENT_PREF[0] % n
+    return [(p + i) % n for i in range(n)]
+
+
+def _tencent_fetch(sym: str, kind: str, count: int, adjust: str) -> list:
+    """按入口轮换取一次腾讯 K 线，返回原始行（date/open/close/high/low/volume 股）。
+
+    adjust：'qfq' 前复权 / '' 不复权。三个入口数据一致，但可用性独立波动，
+    某一个 501 时换下一个，全挂才抛错。
+    """
+    last_err = None
+    for i in _tencent_order():
+        host = TENCENT_HOSTS[i]
+        # 两个端点分工不同：
+        #   fqkline/get 带复权参数，param 末位必须是 qfq/hfq；
+        #   kline/kline  是不复权长历史，param 不能带末位（带空值会直接 501）。
+        n = min(int(count), 800)
+        if adjust == "qfq":
+            url = f"{host}/appstock/app/fqkline/get?param={sym},{kind},,,{n},qfq"
+        else:
+            url = f"{host}/appstock/app/kline/kline?param={sym},{kind},,,{n}"
+        try:
+            j = json.loads(_fetch(url, headers={"Referer": "https://gu.qq.com/"}))
+            # 参数错误换入口也没用，直接抛，别浪费两次请求
+            if str(j.get("msg") or "").lower() == "param error":
+                raise DataError(f"{sym} {kind} 参数错误")
+            node = (j.get("data") or {}).get(sym) or {}
+            # 前复权的键带 qfq 前缀；不复权就是 day/week/month 本身
+            arr = node.get(f"qfq{kind}") if adjust == "qfq" else None
+            if not arr:
+                arr = node.get(kind) or []
+            rows = []
+            for x in arr:
+                if not isinstance(x, (list, tuple)) or len(x) < 6:
+                    continue
+                rows.append({
+                    "date": str(x[0])[:10], "open": _f(x[1]), "close": _f(x[2]),
+                    "high": _f(x[3]), "low": _f(x[4]), "volume": _f(x[5]) * 100,   # 手 -> 股
+                })
+            _TENCENT_PREF[0] = i          # 记住这个入口，下次先用它
+            return rows
+        except DataError:
+            raise                          # 参数类错误不重试
+        except Exception as e:             # 网络/501/解析失败 -> 换下一个入口
+            last_err = e
+            continue
+    raise DataError(f"{sym} {kind} 三个入口都失败: "
+                    f"{type(last_err).__name__}: {last_err}")
+
+
 def tencent_kline(code: str, period: str = "day", count: int = 640) -> pd.DataFrame:
     """腾讯前复权 K 线：period = day / week / month。
 
     为什么要有这个：新浪的 K 线接口只能取到约 300 根日线（一年出头），
     详情页想画"日 / 周 / 月 K"就得往回看到好几年，周线月线更是没法从
     5 分钟线拼出来 —— 腾讯 fqkline 一次给到 640 根，周期原生就分开算好了。
-    字段: date open close high low volume(股)   （前复权口径，除权不影响形态）
+    字段: date open close high low volume(股)
+
+    两条路径：
+      · 腾讯自带的 qfq 是**等差口径**（逐次减每股分红）。日线 640 根（约 2.5 年）
+        分红累计还不够多，全为正，直接用；
+      · 周/月线动辄十几年，高分红老股的早期价格会被减成负数
+        （实测茅台月线 300 根里 178 根为负），这时改取**不复权**长历史，
+        再用新浪的比例因子复权 —— 历史照样长，价格恒为正。
     """
     sym = full(code)
     kind = {"day": "day", "week": "week", "month": "month"}.get(str(period), "day")
-    # 注意域名：web.ifzq.gtimg.cn 在本机会直接回 501（等了很久才发现），
-    # 不带 web. 前缀的 ifzq.gtimg.cn 才通。换回 web. 就是整片请求失败。
-    url = (f"https://ifzq.gtimg.cn/appstock/app/fqkline/get?"
-           f"param={sym},{kind},,,{min(int(count), 800)},qfq")
-    j = json.loads(_fetch(url, headers={"Referer": "https://gu.qq.com/"}))
-    node = (j.get("data") or {}).get(sym) or {}
-    arr = node.get(f"qfq{kind}") or node.get(kind) or []
-    rows = []
-    for x in arr:
-        if not isinstance(x, (list, tuple)) or len(x) < 6:
-            continue
-        rows.append({
-            "date": str(x[0])[:10], "open": _f(x[1]), "close": _f(x[2]),
-            "high": _f(x[3]), "low": _f(x[4]), "volume": _f(x[5]) * 100,   # 手 -> 股
-        })
+    rows = _tencent_fetch(sym, kind, count, "qfq")
     df = pd.DataFrame(rows)
     if df.empty:
         raise DataError(f"{code} {period} K 线为空")
+    if (df[["open", "close", "high", "low"]] <= 0).any().any():
+        # 等差复权把历史减穿了 -> 用「不复权 × 比例因子」重做一遍
+        raw = pd.DataFrame(_tencent_fetch(sym, kind, count, ""))
+        if raw.empty:
+            raise DataError(f"{code} {period} 不复权 K 线为空")
+        df = apply_ratio_qfq(raw, qfq_factors(sym))
+        if df is None or df.empty:
+            raise DataError(f"{code} {period} 比例复权失败")
     df = df[(df["close"] > 0) & (df["high"] > 0)].drop_duplicates("date")
+    if df.empty:
+        raise DataError(f"{code} {period} K 线为空")
     return df.sort_values("date").reset_index(drop=True)
 
 
@@ -354,11 +423,14 @@ def qfq_factors(sym: str) -> list:
     try:
         txt = _fetch(f"https://finance.sina.com.cn/realstock/company/{sym}/qfq.js",
                      headers={"Referer": "https://finance.sina.com.cn/"})
-        a, b = txt.find("{"), txt.rfind("}")
-        if a < 0 or b < 0:
+        a = txt.find("{")
+        if a < 0:
             return []
-        j = json.loads(txt[a:b + 1])
-        return sorted((x["d"], float(x["f"])) for x in (j.get("data") or []))
+        # 响应尾部挂着 `/* base64… */` 注释块：用 rfind("}") 截取理论上会被
+        # 注释里的大括号带偏（现在恰好不含，但没人保证下个月也不含）。
+        # raw_decode 只吃第一个完整 JSON 对象，后面的注释原样忽略，稳。
+        obj, _ = json.JSONDecoder().raw_decode(txt[a:])
+        return sorted((x["d"], float(x["f"])) for x in (obj.get("data") or []))
     except Exception:
         return []
 
@@ -380,6 +452,36 @@ def index_daily(sym: str = "sh000001") -> pd.DataFrame:
         "date").reset_index(drop=True)
 
 
+def apply_ratio_qfq(df: pd.DataFrame, fac: list) -> pd.DataFrame:
+    """按新浪的**比例**复权因子把不复权 K 线换成年化前复权（以最后一根为基准）。
+
+    为什么必须用比例而不是减法：腾讯的 qfq 是等差口径（每次分红从历史价里减掉
+    固定的每股分红），高分红老股一路减下去会变成负数 —— 实测茅台月线 300 根里
+    178 根是负的、格力 179 根负。比例复权永远为正，且相邻两天的比值就是真实
+    涨跌幅，回测与画图都安全。
+    """
+    import bisect
+
+    if df is None or not len(df):
+        return df
+    fdates = [x[0] for x in fac]
+
+    def _fac(d: str) -> float:
+        if not fac:
+            return 1.0
+        i = bisect.bisect_right(fdates, d) - 1
+        return fac[i][1] if i >= 0 else 1.0
+
+    out = df.copy()
+    dates = out["date"].astype(str).str.slice(0, 10).tolist()
+    base = _fac(dates[-1]) if dates else 1.0
+    if not base:
+        base = 1.0
+    for col in ("open", "close", "high", "low"):
+        out[col] = [float(v) / (_fac(d) / base) for v, d in zip(out[col].tolist(), dates)]
+    return out
+
+
 def daily_long(code: str, count: int = 1023) -> pd.DataFrame:
     """长历史日线（**前复权**，最多 1023 根 ≈ 4.2 年），回测和模拟账户用。
 
@@ -398,27 +500,16 @@ def daily_long(code: str, count: int = 1023) -> pd.DataFrame:
     if not arr:
         raise DataError(f"{code} 日线为空")
     fac = qfq_factors(sym)
-    fdates = [x[0] for x in fac]
-
-    def _fac(d: str) -> float:
-        """这个日期适用的复权因子（取 <= 该日期的最后一条）"""
-        if not fac:
-            return 1.0
-        i = bisect.bisect_right(fdates, d) - 1
-        return fac[i][1] if i >= 0 else 1.0
-
-    base = _fac(str(arr[-1]["day"])[:10])
     rows = []
     for x in arr:
-        d = str(x["day"])[:10]
-        k = (_fac(d) / base) if base else 1.0
         rows.append({
-            "date": d,
-            "open": _f(x["open"]) / k, "close": _f(x["close"]) / k,
-            "high": _f(x["high"]) / k, "low": _f(x["low"]) / k,
+            "date": str(x["day"])[:10],
+            "open": _f(x["open"]), "close": _f(x["close"]),
+            "high": _f(x["high"]), "low": _f(x["low"]),
             "volume": _f(x.get("volume")),          # 成交量不跟着调，筹码只看比例
         })
     df = pd.DataFrame(rows)
+    df = apply_ratio_qfq(df, fac)
     df["amount"] = df["volume"] * (df[["high", "low", "close"]].sum(axis=1) / 3)
     df = df.dropna(subset=["close"]).drop_duplicates("date")
     return df.sort_values("date").reset_index(drop=True)

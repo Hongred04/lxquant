@@ -327,6 +327,47 @@ def get_5min(code, count=1023, force=False):
     return df
 
 
+def resample_daily(df, period: str):
+    """把日线合成周线 / 月线。日期取该周期**最后一个交易日** —— 与腾讯 qfq 周线一致。
+
+    为什么要有这个：腾讯 fqkline 整片 501 之后，日线已经能用新浪合成前复权顶上，
+    周线月线却只能"退回旧缓存" —— 表现是详情页的周/月 K 图静默停在几天前，
+    越用越旧，而且没有任何报错。宁可少几根，也要是新的。
+
+    口径说明：
+      · 周线按自然周（周一~周日）分组，月线按自然月；
+      · open 取首日、close 取末日、high/low 取区间极值、volume 求和；
+      · 腾讯的周线 640 根 ≈ 12 年，而日线只有 1023 根 ≈ 4.2 年，
+        所以合成出来的周线约 220 根、月线约 50 根 —— 比原来的少，
+        但能覆盖近四年，画图足够；要更长的历史只能等接口恢复。
+    """
+    try:
+        import pandas as pd
+    except Exception:
+        return None
+    if df is None or not len(df):
+        return None
+    d = df.copy()
+    d["date"] = d["date"].astype(str).str.slice(0, 10)
+    rule = "W" if period == "week" else "M"
+    key = pd.to_datetime(d["date"], errors="coerce").dt.to_period(rule)
+    d = d[key.notna()]
+    key = key[key.notna()]
+    if not len(d):
+        return None
+    g = d.groupby(key, sort=True)
+    out = pd.DataFrame({
+        "date": g["date"].last(),
+        "open": g["open"].first(),
+        "close": g["close"].last(),
+        "high": g["high"].max(),
+        "low": g["low"].min(),
+        "volume": g["volume"].sum(),
+    }).reset_index(drop=True)
+    out = out.dropna(subset=["close"]).sort_values("date").reset_index(drop=True)
+    return out if len(out) else None
+
+
 def get_kline(code, period: str = "day", count: int = 640, force=False):
     """日 / 周 / 月前复权 K 线（详情页画图用，不走 5 分钟线那套均价策略的数据）。
 
@@ -340,7 +381,7 @@ def get_kline(code, period: str = "day", count: int = 640, force=False):
     if not force and _fresh(p, DAY_TTL if _in_session() else IDLE_TTL):
         try:
             df = _load(p)
-            if len(df) >= 30 and _today_ok(df):
+            if len(df) >= 20 and _today_ok(df):
                 return df
         except Exception:
             pass
@@ -351,17 +392,18 @@ def get_kline(code, period: str = "day", count: int = 640, force=False):
         # 直连和走代理都一样，不是限流）。此时**不能直接退回旧缓存**：
         # 旧缓存停在几天前，回看涨跌会算出 days=0、0%，界面上一片「等收盘」，
         # 看起来像功能坏了，其实只是数据没跟上。
-        # 日线有现成的前复权替代口径（新浪不复权 × 新浪复权因子，见 daily_long），
-        # 先用它顶上；周月线拼不出来，只能退回旧缓存。
-        if period == "day":
-            try:
-                df = ds.daily_long(code, max(int(count), 640))
+        # 三个周期都有新浪合成的替代口径（不复权 × 复权因子，见 daily_long）：
+        # 日线直接用，周月线由日线 resample 出来。合成失败才退回旧缓存。
+        try:
+            base = ds.daily_long(code, 1023)
+            df = base if period == "day" else resample_daily(base, period)
+            if df is not None and len(df) >= 20:
                 _dump(df, p)
                 return df
-            except Exception:
-                pass
+        except Exception:
+            pass
         if p.exists():
-            return _load(p)            # 前复权也拿不到：旧缓存兜底，宁可晚一天也别画不出图
+            return _load(p)            # 替代口径也拿不到：旧缓存兜底，宁可晚一天也别画不出图
         if period == "day":
             return get_daily(code, min(int(count), 300))   # 全挂了退回不复权日线
         raise
