@@ -26,7 +26,14 @@
 阈值来自历史拟合（vs20 < -1%），不是物理常数；界面会把 vs20 的实际值显示出来，
 让你能自己判断当前该不该信它。
 """
+import threading
 import time
+
+# metrics() 会被回测的 10 个线程同时调用（每只票都要逐日判市场状态）。
+# 没有锁时，冷启动那一次会各自重建一遍：一边建一边有人读到半成品，
+# 表现为「同一组参数连跑两次，交易笔数不一样」（实测 13 笔 / 14 笔）。
+# 加锁后只有第一个线程真正构建，其余等它建完直接用。
+_METRICS_LOCK = threading.Lock()
 
 from . import datasource as ds
 
@@ -49,27 +56,32 @@ def index_daily():
 def metrics():
     """每个交易日的市场状态指标（从第 120 根起，因为要 120 日均量）"""
     index_daily()
-    if _MEM["metrics"] is not None:
-        return _MEM["metrics"]
-    df = _MEM["data"]
-    out = {}
-    dates = df["date"].astype(str).str.slice(0, 10).tolist()
-    closes = df["close"].astype(float).tolist()
-    vols = [float(v or 0) for v in df["volume"].tolist()]
-    for i in range(120, len(dates)):
-        ma20 = sum(closes[i-19:i+1]) / 20
-        ma60 = sum(closes[i-59:i+1]) / 60
-        v20 = sum(vols[i-19:i+1]) / 20
-        v120 = sum(vols[i-119:i+1]) / 120
-        out[dates[i]] = {
-            "vs20": (closes[i] / ma20 - 1) * 100 if ma20 else 0.0,
-            "vs60": (closes[i] / ma60 - 1) * 100 if ma60 else 0.0,
-            "ret20": (closes[i] / closes[i-20] - 1) * 100 if closes[i-20] else 0.0,
-            "volr": (v20 / v120) if v120 else 1.0,
-            "close": closes[i],
-        }
-    _MEM["metrics"] = out
-    return out
+    got = _MEM["metrics"]
+    if got is not None:
+        return got
+    # 双检锁：多数情况走上面那条快路径，只有冷启动会进临界区
+    with _METRICS_LOCK:
+        if _MEM["metrics"] is not None:
+            return _MEM["metrics"]
+        df = _MEM["data"]
+        out = {}
+        dates = df["date"].astype(str).str.slice(0, 10).tolist()
+        closes = df["close"].astype(float).tolist()
+        vols = [float(v or 0) for v in df["volume"].tolist()]
+        for i in range(120, len(dates)):
+            ma20 = sum(closes[i-19:i+1]) / 20
+            ma60 = sum(closes[i-59:i+1]) / 60
+            v20 = sum(vols[i-19:i+1]) / 20
+            v120 = sum(vols[i-119:i+1]) / 120
+            out[dates[i]] = {
+                "vs20": (closes[i] / ma20 - 1) * 100 if ma20 else 0.0,
+                "vs60": (closes[i] / ma60 - 1) * 100 if ma60 else 0.0,
+                "ret20": (closes[i] / closes[i-20] - 1) * 100 if closes[i-20] else 0.0,
+                "volr": (v20 / v120) if v120 else 1.0,
+                "close": closes[i],
+            }
+        _MEM["metrics"] = out
+        return out
 
 
 def state(pct: float | None = None) -> dict:

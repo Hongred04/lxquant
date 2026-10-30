@@ -13,10 +13,26 @@ from .. import indicators as ind
 from .base import Ctx, Facts, Gate, Strategy
 
 
+def _pnum(p: dict, key: str, default: float) -> float:
+    """取数值参数，默认值只在**真的没设**（None / 缺键）时才用。
+
+    为什么不能写 `p.get(key, d) or d`：0 是合法取值（比如 turn_min=0 表示
+    不看收盘位置、drop_pct=0 表示不要求跌幅），但 `0 or d` 会把它悄悄换成
+    默认值 —— 面板上把旋钮拧到 0，程序里根本没生效，而且界面上看不出来。
+    """
+    v = p.get(key)
+    if v is None or v == "":
+        return float(default)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _gate_drop(f: Facts, ctx: Ctx, p: dict) -> dict:
     """近 N 天跌得够多（跌得越狠，反弹空间越大）。"""
-    n = int(p.get("drop_lookback", 20) or 20)
-    need = float(p.get("drop_pct", 0.20) or 0.20)
+    n = int(_pnum(p, "drop_lookback", 20))
+    need = _pnum(p, "drop_pct", 0.20)
     d = ctx.hist
     if len(d) <= n:
         return {"ok": False, "why": "数据不够"}
@@ -46,7 +62,7 @@ def _gate_turn(f: Facts, ctx: Ctx, p: dict) -> dict:
     if hi <= lo:
         return {"ok": False, "why": "今天没有振幅"}
     pos = (c - lo) / (hi - lo)
-    need = float(p.get("turn_min", 0.5) or 0.5)
+    need = _pnum(p, "turn_min", 0.5)
     if pos >= need:
         return {"ok": True, "why": ""}
     return {"ok": False, "why": "今天收在最低到最高之间的 %.0f%% 位置，要 ≥ %.0f%%" % (pos * 100, need * 100)}
@@ -74,7 +90,7 @@ class OversoldBounce(Strategy):
 
     def facts(self, ctx: Ctx, p: dict) -> Facts:
         d = ctx.hist
-        n = int(p.get("drop_lookback", 20) or 20)
+        n = int(_pnum(p, "drop_lookback", 20))
 
         def b_chg():
             if len(d) <= n:

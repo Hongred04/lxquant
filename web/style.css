@@ -429,6 +429,46 @@ html[data-theme="light"] .hl.warn{border-left-color:rgba(192,125,16,.5);backgrou
 .kpi.hot{background:linear-gradient(180deg,var(--panel),var(--panel-2));border-color:var(--line-2)}
 .kpi.hot .v{font-size:24px}
 .kpi.hot .k{color:var(--txt-2)}
+
+/* ---------------- 准入结论卡（回测页） ----------------
+   放在 KPI 上面：先给「能不能用」的结论，指标只是支撑证据。
+   四种结论靠左边框和图标底色区分，正文保持中性色，避免满屏红黄绿。 */
+.verdict{
+  background:var(--panel);border:1px solid var(--line);border-left-width:3px;
+  border-radius:var(--radius);padding:11px 14px;margin-bottom:10px;
+}
+.verdict .v-hd{display:flex;align-items:center;gap:8px;font-size:13.5px}
+.verdict .v-hd b{font-weight:600}
+.verdict .v-ic{
+  flex:0 0 auto;width:18px;height:18px;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;line-height:1;color:#fff;
+}
+.verdict .v-note{margin:6px 0 9px;color:var(--txt-2);font-size:12px;line-height:1.65}
+.verdict .v-chips{display:flex;flex-wrap:wrap;gap:6px}
+.verdict .vc{
+  display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;
+  border:1px solid var(--line);border-radius:6px;background:var(--panel-2);
+  font-size:11.5px;color:var(--txt-2);white-space:nowrap;
+}
+.verdict .vc i{font-style:normal;font-size:10px;line-height:1}
+.verdict .vc b{font-family:var(--mono);font-weight:600;color:var(--txt)}
+.verdict .vc.ok{border-color:rgba(47,214,165,.3);background:rgba(47,214,165,.07)}
+.verdict .vc.ok i{color:var(--ok)}
+.verdict .vc.no{border-color:rgba(255,95,109,.28);background:rgba(255,95,109,.07)}
+.verdict .vc.no i{color:var(--bad)}
+/* 中间态：没到"可以当默认"的线，但还在"能用"的容忍范围内 —— 标黄不标红，
+   否则 watch 档下面一片红叉，跟结论"能用"自相矛盾。 */
+.verdict .vc.watch{border-color:rgba(245,181,68,.3);background:rgba(245,181,68,.07)}
+.verdict .vc.watch i{color:var(--warn)}
+.verdict.v-pass{border-left-color:var(--ok)}
+.verdict.v-pass .v-ic{background:var(--ok);color:#04251c}
+.verdict.v-watch{border-left-color:var(--warn)}
+.verdict.v-watch .v-ic{background:var(--warn);color:#2a1f04}
+.verdict.v-fail{border-left-color:var(--bad)}
+.verdict.v-fail .v-ic{background:var(--bad)}
+.verdict.v-insufficient{border-left-color:var(--line-2)}
+.verdict.v-insufficient .v-ic{background:var(--txt-3)}
 .kpi[data-kpi="watch"]{cursor:pointer}
 .kpi[data-kpi="watch"]:hover{border-color:var(--accent);background:var(--row-hover)}
 .kpi[data-kpi="watch"]:hover .s{color:var(--accent-2)}

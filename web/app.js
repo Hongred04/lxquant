@@ -1759,7 +1759,7 @@ function renderBtEmpty() {
   const has = !!(S.bt && S.bt.summary);
   const box = $('#bt-empty'); if (box) box.hidden = has;
   const more = $('#bt-more'); if (more) more.hidden = !has;   // 没跑过就别摆「在整屏里看」
-  ['#bt-kpis', '#view-backtest .row2', '#bt-table'].forEach(sel => {
+  ['#bt-verdict', '#bt-kpis', '#view-backtest .row2', '#bt-table'].forEach(sel => {
     const el = document.querySelector(sel);
     if (el) el.hidden = !has;
   });
@@ -1777,9 +1777,42 @@ function renderPfEmpty() {
   paintPfCharts();
 }
 
+/* 准入结论卡：这套规则够不够格当默认策略。
+ *
+ * 为什么单独一张卡、而且放在 KPI 上面：
+ *   用户真正想知道的是"能不能用"，一堆指标只是证据。先给结论再给证据，
+ *   比让人从六个 KPI 里自己推要快得多。
+ *
+ * 判定逻辑在 lxquant/verdict.py（纯函数、有单测），前端只负责画 ——
+ * 门槛写在一处，改标准不用前后端各改一遍。
+ */
+function renderBtVerdict(v) {
+  const box = $('#bt-verdict');
+  if (!box) return;
+  // 旧结果没有这个字段，或者后端算挂了：不要空着一张卡，直接藏起来
+  if (!v || !v.level) { box.hidden = true; box.innerHTML = ''; return; }
+  const icon = { pass: '✓', watch: '!', fail: '✗', insufficient: '?' }[v.level] || '·';
+  const chips = (v.checks || []).map(c => {
+    const val = (c.value === null || c.value === undefined) ? '—' : c.value;
+    // 三态：ok 达标 / watch 在容忍范围内（标黄）/ no 真不行。
+    // 只有两种颜色的话，"watch 档下面一片红叉"会让人觉得结论自相矛盾。
+    const lv = c.level || (c.ok ? 'ok' : 'no');
+    const mark = { ok: '✓', watch: '!', no: '✗' }[lv] || '·';
+    return `<span class="vc ${lv}" title="${esc(c.text || '')} · 门槛 ${esc(c.need || '')}">
+      <i>${mark}</i>${esc(c.label)}<b>${esc(val)}</b></span>`;
+  }).join('');
+  box.className = 'verdict v-' + v.level;
+  box.hidden = false;
+  box.innerHTML = `
+    <div class="v-hd"><span class="v-ic">${icon}</span><b>${esc(v.label || '')}</b></div>
+    <p class="v-note">${esc(v.note || '')}</p>
+    <div class="v-chips">${chips}</div>`;
+}
+
 function renderBacktest() {
   const r = S.bt; if (!r) return;
   renderBtEmpty();
+  renderBtVerdict(r.verdict);
   const s = r.summary;
   const kb = $('#bt-kpis');
   kb.innerHTML = [
@@ -2909,7 +2942,10 @@ const PANES = {
         box.innerHTML = '<div class="empty-state"><b>还没检验过</b><span>先在本页点「开始检验」，跑完再回来看</span></div>'; return;
       }
       const tbl = $('#bt-table');
-      box.innerHTML = `<div class="pm-panel"><div class="ph"><b>一、信号质量</b></div><div class="kpis">${$('#bt-kpis').innerHTML}</div></div>
+      // 结论卡跟着一起搬进来：大窗口里更该先看到"能不能用"，再谈细节
+      const vd = $('#bt-verdict');
+      const vdHtml = (vd && !vd.hidden) ? vd.outerHTML : '';
+      box.innerHTML = `${vdHtml}<div class="pm-panel"><div class="ph"><b>一、信号质量</b></div><div class="kpis">${$('#bt-kpis').innerHTML}</div></div>
         <div class="pm-row2">
           <div class="pm-panel"><div class="ph"><b>一笔一笔赚了多少</b><span class="muted">每笔的净收益率 %，按区间分堆</span></div>${$('#bt-dist').innerHTML}</div>
           <div class="pm-panel"><div class="ph"><b>为什么卖出的</b></div>${$('#reason-box').innerHTML}</div>

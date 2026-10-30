@@ -353,7 +353,13 @@ def robust_score(trades: list, k: int = 5) -> dict:
     """
     out = {"robust": None, "median": None, "worst": None, "folds": [], "warn": ""}
     ts = [t for t in (trades or []) if t.get("buy_date")]
-    ts.sort(key=lambda t: t["buy_date"])
+    # ★ 排序必须**完全确定**：只按 buy_date 排是不够的 ——
+    #   同一天常常有好几只票同时买入（回测里很常见），它们的先后取决于
+    #   run_backtest 用 as_completed 收集结果的顺序，也就是线程完成顺序。
+    #   顺序一变，分折的切点就变，同一天的那几笔会被分到不同的折 ——
+    #   实测同一组交易连跑三次，稳健分在 -1.01 / -1.01 / -0.79 之间跳。
+    #   加上 code / signal_date 作为二级键，同一批交易永远得到同一个分数。
+    ts.sort(key=lambda t: (t["buy_date"], t.get("code") or "", t.get("signal_date") or ""))
     n = len(ts)
     if n == 0:
         out["warn"] = "没有交易"
@@ -434,8 +440,17 @@ def run_backtest(params: dict, weights: dict, codes=None, limit: int = 40,
         total.update(robust_score(all_trades, k=5))
     except Exception:
         pass
+    # 准入判定：这套规则够不够格当默认。
+    # 放在这里而不是前端算 —— 结论要跟结果一起产出，命令行走一遍也是同一个判断。
+    try:
+        from . import verdict as _verdict
+        _vd = _verdict.judge(total)
+    except Exception:
+        _vd = None
     return {
         "summary": total,
+        # 一句话结论 + 逐条判据（前端直接渲染，不用自己拼判断逻辑）
+        "verdict": _vd,
         "coverage": coverage,
         "trades": sorted(all_trades, key=lambda t: t["buy_date"], reverse=True)[:500],
         "per_stock": per_stock[:60],
