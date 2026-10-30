@@ -19,8 +19,9 @@ from . import extdata as ext
 from .jsonutil import dumps
 
 ROOT = Path(__file__).resolve().parent.parent
-# 手机版把网页放在 lxquant 旁边的 web_m/（或由环境变量指过去），桌面版还是 web/
-WEB = Path(os.environ.get("LXQ_WEB") or (ROOT / ("web_m" if os.environ.get("LXQ_MOBILE") == "1" else "web")))
+# 网页目录：默认 web/；LXQ_WEB 可指到别处（调试或另做一套界面时用）。
+# 手机版 web_m/ 已于 2026-10-30 删除 —— 打包成 APK 在手机上跑太慢，不再维护那条线。
+WEB = Path(os.environ.get("LXQ_WEB") or (ROOT / "web"))
 APP_VERSION = "1.9.0"
 
 # ---------------------------------------------------------------- 任务状态

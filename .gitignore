@@ -47,13 +47,9 @@ _server_log.txt
 # ============ 安卓：构建产物与二进制 ============
 
 # APK 产物（一个 38MB，随时能重打）
-android/dist/*.apk
 # 中间产物（classes、对齐前后的包、解包出来的 py/）
-android/build/
 # Python 代码包与标准库 pyc（pack_py.py 重新生成；标准库那份需要 CPython 3.12 才能编）
-android/app/src/main/assets/*.zip
 # 签名密钥：本机私有，绝不进仓库
-android/signkey.ks
 
 # 隔离目录：删掉的旧策略 / 旧策略产生的记忆记录，留作本地备查，不进仓库
 data/*_quarantine/
