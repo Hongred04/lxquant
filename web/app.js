@@ -3455,10 +3455,13 @@ async function init() {
   });
 
   // 自动加载上次结果（软件后台可能已经跑过了）
+  // _lastDay 记下"服务端上次扫描是哪天"——自动补扫的判据全靠它，见下面那个块
+  let _lastDay = '';
   try {
     const r = await api('/api/last');
     if (r.result) {
       applyResult(r.result, r.result.auto ? '（自动）' : '（上次的结果）');
+      _lastDay = String(r.result.generated_at || '').slice(0, 10);
     }
   } catch { }
 
@@ -3476,8 +3479,14 @@ async function init() {
   ALERTS.timer = setInterval(syncAlerts, 60000);
 
   // 一次都没有结果时（第一次打开，或自动模式还没跑到），自己先跑一遍，
-  // 用户不用点任何按钮就有名单看
-  if (!S.items.length) {
+  // 用户不用点任何按钮就有名单看。
+  // ★ 判据必须是「服务端上次扫描不是今天」，而不是「这个页面还没拿到名单」——
+  //   以前只看 S.items.length：/api/last 万一没按时回来（新标签页、代理抖动、
+  //   异常被吞），页面就会在 1.5 秒后擅自发起一次全市场扫描。
+  //   收盘后打开页面时这招是灾难：盘后快照选出的名单跟 14:45 实盘那份完全不同，
+  //   还会被 force=True 记进当天记忆，把定型名单覆盖掉（2026-10-29 实测 40 → 5）。
+  //   只要今天跑过（哪怕选出 0 只），就老老实实展示服务端那份，不再自作主张。
+  if (_lastDay !== todayStr() && !S.items.length) {
     setTimeout(() => {
       try {
         if (S.items.length || S.busy.screen) return;

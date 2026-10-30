@@ -163,6 +163,26 @@ def save_result(r: dict, date: str | None = None, force: bool = False):
         old["runs"] = int(old.get("runs") or 0) + 1
         _write(date, old)
         return
+    # ★ 盘后重扫**连 force 也不许覆盖**盘中定型的名单。
+    #   盘后行情快照给的是收盘价，跟 14:45 实盘可买的那份是两个口径，
+    #   选出的名单会大幅缩水（实测 2026-10-29：17:04 页面自动补扫只选出 5 只，
+    #   force=True 直接把 14:45 定型的 40 只覆盖没了）。
+    #   判据用「两边各自的时刻」而不是当前时钟：定型名单产生于 15:00 之前、
+    #   新结果产生于 15:00 之后 → 口径不同，拒绝覆盖。这样任何时候都拦得住，
+    #   而盘后手工纠错过的记录（at 也在盘后）仍允许被再次覆盖。
+    #   真要强行纠错只能手动改 data/memory/ 下的文件（刻意为之，防止顺手点一下就毁了账）。
+    def _hm_of(s: str) -> str:
+        return str(s or '')[11:16]
+
+    _new_at = str(r.get("generated_at") or '') or time.strftime("%Y-%m-%d %H:%M:%S")
+    _old_hm = _hm_of(old.get("at"))
+    if (force and old.get("basis") == "tail"
+            and (old.get("items") or old.get("watch"))
+            and _old_hm and _old_hm < "15:00"
+            and _hm_of(_new_at) >= "15:00"):
+        old["runs"] = int(old.get("runs") or 0) + 1
+        _write(date, old)
+        return
     params = stats.get("params") or {}
 
     def _brief(a, gap=None):
