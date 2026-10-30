@@ -117,6 +117,11 @@ def _run_once(reason: str, store: bool = True, limit: int | None = None,
     with _LOCK:
         _STATE["busy"] = True
         _STATE["last_reason"] = reason + (f"（尾盘前试算 @ {pv}）" if pv else "")
+    # 扫描的起止必须落日志：这是回答"今天 14:45 到底跑没跑、花了多久"的唯一凭据
+    from . import runlog
+    _t0 = time.time()
+    runlog.info("auto.scan.start", reason=reason, limit=lim, mode=mode,
+                preview=pv, late=bool(late))
     try:
         j = server.new_job("auto")
         r = screener.run_screen(p, cfg["weights"], limit=lim, mode=mode,
@@ -144,6 +149,7 @@ def _run_once(reason: str, store: bool = True, limit: int | None = None,
         with _LOCK:
             _STATE["last_error"] = f"{type(e).__name__}: {e}"
             _STATE["busy"] = False
+        runlog.exc("auto.scan.fail", reason=reason, after=round(time.time() - _t0, 1))
         return
     with _LOCK:
         _STATE["busy"] = False
@@ -154,6 +160,10 @@ def _run_once(reason: str, store: bool = True, limit: int | None = None,
         _STATE["runs"] += 1
         _STATE["last_error"] = ""
         _STATE["last_reason"] = (reason + " · " + _hit_info(reason))[:120]
+    _st = (r.get("stats") or {}) if isinstance(r, dict) else {}
+    runlog.info("auto.scan.done", reason=reason, hit=_st.get("hit"),
+                scanned=_st.get("scanned"), basis=_st.get("basis"),
+                gated=bool(_st.get("gated")), elapsed=round(time.time() - _t0, 1))
 
 
 def _hit_info(reason: str) -> str:

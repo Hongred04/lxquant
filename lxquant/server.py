@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """零依赖 HTTP 服务器（Windows 下 select 不支持管道的限制，改用 ThreadingHTTPServer）。"""
+import atexit
 import gzip
 import json
 import os
@@ -452,6 +453,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, **auto.status(),
                                    "preview_now": auto._preview_at(cfg["params"], _dt.now()),
                                    "tail_from": cfg["params"].get("tail_from", "14:30")})
+            if p == "/api/log":
+                # 运行日志：默认给最近 120 行；errors=1 只要异常行。
+                # 出问题时（"昨天怎么没记录"这类）这是最快的定位入口。
+                from . import runlog
+                n = int(q.get("n") or 120)
+                if q.get("errors"):
+                    return self._json({"ok": True, **runlog.status(),
+                                       "errors": runlog.recent_errors(n)})
+                return self._json({"ok": True, **runlog.status(),
+                                   "lines": runlog.tail(n)})
             if p == "/api/last":
                 demo = q.get("demo")
                 if demo:
@@ -712,6 +723,14 @@ class _Server(ThreadingHTTPServer):
 def serve(host="127.0.0.1", port=8777, open_browser=True):
     srv = _make_server(host, port)
     url = f"http://{host}:{port}/"
+    # 进程生命周期进日志：出问题时能一眼看出"是正常关掉、崩溃、还是被 kill"。
+    # 启动记一次 pid，退出再记一次 —— 日志里只有 start 没有 stop，
+    # 就说明进程是被强制结束的（不是正常关闭）。
+    from . import runlog
+    runlog.install_hooks()
+    runlog.info("app.start", host=host, port=port, pid=os.getpid(),
+                py=sys.version.split()[0])
+    atexit.register(lambda: runlog.info("app.stop", pid=os.getpid(), why="normal"))
     print("=" * 56)
     print("  lxquant 量价低位选股系统已启动")
     print(f"  访问地址: {url}")

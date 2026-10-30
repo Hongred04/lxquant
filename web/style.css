@@ -469,6 +469,32 @@ html[data-theme="light"] .hl.warn{border-left-color:rgba(192,125,16,.5);backgrou
 .verdict.v-fail .v-ic{background:var(--bad)}
 .verdict.v-insufficient{border-left-color:var(--line-2)}
 .verdict.v-insufficient .v-ic{background:var(--txt-3)}
+
+/* ---------------- 运行日志（设置页底部） ----------------
+   默认收起，只在要查"昨天怎么没记录 / 半夜怎么停了"时展开。
+   等宽字体、单行不折，方便比对时间戳。 */
+.runlog{
+  /* flex:0 0 auto 不能省：二级页的 .hd 是 flex 列布局，
+     .set-grid 会把剩余空间吃掉，details 默认允许收缩 ——
+     实测展开后高度只剩 2px，看着像"点了没反应"。 */
+  flex:0 0 auto;
+  margin-top:12px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel);overflow:hidden;
+}
+.runlog summary{
+  cursor:pointer;padding:9px 12px;font-size:12px;color:var(--txt-2);
+  list-style:none;user-select:none;
+}
+.runlog summary::-webkit-details-marker{display:none}
+.runlog summary:before{content:'▸';display:inline-block;width:14px;color:var(--txt-3)}
+.runlog[open] summary:before{content:'▾'}
+.runlog summary:hover{color:var(--txt)}
+.runlog pre{
+  margin:0;padding:10px 12px;border-top:1px solid var(--line);
+  max-height:320px;overflow:auto;font-family:var(--mono);font-size:11px;
+  line-height:1.65;color:var(--txt-3);white-space:pre;tab-size:4;
+}
+.runlog pre.has-err{color:var(--txt-2)}
 .kpi[data-kpi="watch"]{cursor:pointer}
 .kpi[data-kpi="watch"]:hover{border-color:var(--accent);background:var(--row-hover)}
 .kpi[data-kpi="watch"]:hover .s{color:var(--accent-2)}

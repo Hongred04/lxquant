@@ -494,6 +494,13 @@
       <div class="param-lock" id="param-lock-bar"></div>
       <div class="set-grid" id="set-grid"></div>
       <div class="muted set-tip">每张卡只放最常用的几项，点了「还有 N 项 / 开」把那一组摊开成一屏再来改。</div>
+
+      <!-- 运行日志：默认收起，只有要查"昨天怎么没记录/半夜怎么停了"时才点开。
+           放在设置页最底部 —— 平时用不到，出事时是第一个该看的地方。 -->
+      <details class="runlog" id="runlog-box">
+        <summary>运行日志 <span class="muted" id="runlog-meta">加载中…</span></summary>
+        <pre id="runlog-pre">—</pre>
+      </details>
       </div>
     </section>
   </main>

@@ -345,6 +345,14 @@ def _tencent_fetch(sym: str, kind: str, count: int, adjust: str) -> list:
             raise                          # 参数类错误不重试
         except Exception as e:             # 网络/501/解析失败 -> 换下一个入口
             last_err = e
+            # 入口失败留痕：同一入口 5 分钟内只记一条，否则一次扫描就能刷几百行
+            try:
+                from . import runlog
+                runlog.log_once(f"tencent.host.fail:{host}", "datasource.tencent.fail",
+                                ttl=300, level="WARN", host=host,
+                                err=f"{type(e).__name__}: {str(e)[:80]}")
+            except Exception:
+                pass
             continue
     raise DataError(f"{sym} {kind} 三个入口都失败: "
                     f"{type(last_err).__name__}: {last_err}")

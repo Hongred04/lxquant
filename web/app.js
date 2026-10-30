@@ -3298,6 +3298,36 @@ function renderSettings() {
     $$('#set-grid [data-k]').forEach(el => { el.disabled = true; });
   }
   bindToggles($('#set-grid'));
+  initRunlog();
+}
+
+/** 运行日志：默认收起，展开时才去拉 —— 平时不看，出事时第一个要看的东西。
+ *
+ *  为什么放在设置页最底部：它属于"维护信息"，不该占主界面的位置；
+ *  但也不能只藏在文件系统里 —— 用户不一定会去翻 data/logs/。
+ */
+function initRunlog() {
+  const box = $('#runlog-box');
+  if (!box || box.dataset.wired) return;
+  box.dataset.wired = '1';
+  const meta = $('#runlog-meta'), pre = $('#runlog-pre');
+  box.addEventListener('toggle', async () => {
+    if (!box.open) return;
+    meta.textContent = '加载中…';
+    try {
+      const r = await api('/api/log?n=100');
+      const lines = r.lines || [];
+      const bad = (r.last_error || '').trim();
+      meta.textContent = `今天 ${r.line_count || 0} 条` + (bad ? ' · 有异常' : ' · 无异常')
+        + (r.file ? ` · ${String(r.file).split(/[\\/]/).pop()}` : '');
+      pre.textContent = lines.length ? lines.join('\n') : '今天还没有记录';
+      pre.scrollTop = pre.scrollHeight;
+      pre.classList.toggle('has-err', !!bad);
+    } catch (e) {
+      meta.textContent = '读不到日志';
+      pre.textContent = String((e && e.message) || e);
+    }
+  });
 }
 /** 一张卡里那些 frow（head 为空就是全部字段） */
 function setCardBody(cat, head, p, w) {
