@@ -246,6 +246,10 @@ def save_result(r: dict, date: str | None = None, force: bool = False):
         "basis": stats.get("basis") or "",
         # 买入价取自哪个时刻的分时（空 = 取不到分时，用的快照价）
         "price_at": price_at,
+        # 收盘之后才补跑的（白天没开软件）：名单是按**收盘价**判定达标的，
+        # 而买入价仍锚定 14:45 的分时价 —— 两个口径不一致，界面必须说明，
+        # 否则会以为这份名单和盘中 14:45 那份等价。
+        "late": bool((r.get("auto") or {}).get("late")),
         "params": {
             # 记下是哪套策略选的 —— 换过策略之后，不同策略的成绩不能混在一起比。
             # 之前的记录没这个字段，只能靠时间线猜（见 2026-10-29 的清理）。
@@ -292,6 +296,8 @@ def list_days(n: int = 60) -> list:
             "watch": len(o.get("watch") or []),
             "scanned": (o.get("stats") or {}).get("scanned"),
             "names": [x.get("name") for x in (o.get("items") or [])][:6],
+            # 收盘后才补扫的那天：日期选择器里要能一眼看出来
+            "late": bool(o.get("late")),
         })
     return out
 
@@ -579,6 +585,8 @@ def review(date: str | None = None, code: str | None = None, limit: int = 120,
         "basis": o.get("basis"),
         # 买入价取自哪个时刻的分时（空 = 当时取不到，用的快照价）
         "price_at": o.get("price_at"),
+        # 收盘后才补扫的（白天没开软件）：名单按收盘价判定，口径与盘中那份不同
+        "late": bool(o.get("late")),
         "hit": o.get("hit_count", 0),
         "rows": rows,
         "sum": _sum_rows(rows),

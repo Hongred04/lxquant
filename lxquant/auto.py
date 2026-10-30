@@ -84,12 +84,15 @@ def _preview_at(params: dict, now: datetime) -> str | None:
     return None
 
 
-def _run_once(reason: str, store: bool = True, limit: int | None = None) -> None:
+def _run_once(reason: str, store: bool = True, limit: int | None = None,
+              late: bool = False) -> None:
     """跑一次自动选股，结果写进 server 的 _last_screen。
 
     limit：0 = 不受 auto_every 限制、必须真跑一次（尾盘终极扫用）；
            None / 其它数字 = 距上次不足 auto_every 就跳过（只刷新计时，不覆盖名单）。
     store：True 才覆盖已存下来的名单，False 只更新内存里的结果。
+    late：收盘之后才补跑的（白天没开软件）。名单是用收盘价判定的，
+          和 14:45 实盘那份不是一个口径，要如实标给用户看。
     """
     from . import server
     cfg = config.load_config()
@@ -119,7 +122,7 @@ def _run_once(reason: str, store: bool = True, limit: int | None = None) -> None
         r = screener.run_screen(p, cfg["weights"], limit=lim, mode=mode,
                                 progress=j.progress, preview_at=pv)
         r["auto"] = {"reason": reason, "at": now.strftime("%Y-%m-%d %H:%M:%S"),
-                     "preview_at": pv, "limit": lim}
+                     "preview_at": pv, "limit": lim, "late": bool(late)}
         if store:
             server._last_screen["result"] = r
             try:
@@ -203,6 +206,65 @@ def _watch_tick(now) -> None:
         print(f"[自选股] 提醒检查失败：{type(e).__name__}: {e}")
 
 
+def _has_final_today(today: str) -> bool:
+    """当天是否已经跑过定型扫（跑过就算，不管选出几只）。
+
+    用来兜住"服务重启后 _STATE['final_done'] 丢失"的情况：
+    没有这道检查，晚上重开软件会再跑一次全市场扫描（白烧半分多钟的网络和 CPU）。
+
+    两个来源都要看：
+      · 记忆文件 —— 有票的日子在这里；
+      · last_screen —— **空名单的日子**（一只没选出）按设计不写记忆文件，
+        但它确实已经跑过了。只看记忆的话，晚上重启会反复补扫空名单的日子。
+    """
+    try:
+        from . import memory
+        o = memory.get(today) or {}
+        if o.get("basis") == "tail" and (o.get("items") or o.get("watch")):
+            return True
+    except Exception:
+        pass
+    try:
+        from . import server
+        r = server._load_last_screen() or {}
+        if (str(r.get("generated_at") or "")[:10] == today
+                and (r.get("stats") or {}).get("basis") == "tail"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _final_reason(p: dict, now: datetime, done_today: bool) -> str:
+    """今天该不该跑尾盘扫；返回原因（空串 = 不跑）。
+
+    纯函数，方便单测（不碰时钟以外的状态）。
+
+    为什么不再要求"必须在 09:35-15:00 窗口内"：
+      以前这段判断在 in_hours 之内，15:00 一到主循环就 continue，
+      于是**白天没开软件的日子，晚上打开只能看到昨天** —— 当天没有任何记录。
+      而记忆页、回测样本全靠这个记录累积，少一天就少一天。
+      现在放宽到"当天未定型 + 已过 auto_final"，收盘后、甚至半夜打开也会补一份，
+      标注为「收盘后补扫」：名单是按收盘价判定的，买入价仍锚定 14:45 的分时
+      （盘后分时数据还在），两者口径差要在界面上说清楚。
+    """
+    if not bool(p.get("auto_final_enabled", True)):
+        return ""
+    # 总开关关掉 = 用户明确不希望软件自己扫。补扫也不该越过这条线，
+    # 否则"关了自动选股，半夜还在偷偷跑"会让人摸不着头脑。
+    if not bool(p.get("auto_scan", True)):
+        return ""
+    if not is_trade_day(now):
+        return ""
+    final_at = str(p.get("auto_final") or "14:50")
+    if _hm(final_at) <= 0 or _now_hm(now) < _hm(final_at):
+        return ""
+    if done_today:
+        return ""
+    # 15:05 之前仍在"当天尾盘"的意义上；之后就是补扫
+    return "尾盘终极扫" if _now_hm(now) <= 15 * 100 + 5 else "收盘后补扫"
+
+
 def _loop():
     """调度主循环：没到点就多睡，到点前后每 30 秒看一眼。"""
     time.sleep(4)          # 等服务起来
@@ -223,6 +285,22 @@ def _loop():
             cfg = config.load_config()
             p = cfg["params"]
             now = datetime.now()
+            today = now.strftime("%Y-%m-%d")
+
+            # ★ 尾盘扫 / 收盘后补扫：放在时段判断之前。
+            #   原来这段在 in_hours 之后，15:00 一过就永远到不了 ——
+            #   白天没开软件的日子，晚上打开也补不上当天的名单。
+            done = (_STATE["final_done"] == today) or _has_final_today(today)
+            fin = _final_reason(p, now, done)
+            if fin:
+                with _LOCK:
+                    _STATE["final_done"] = today
+                    _STATE["next_run"] = None
+                # limit=0：不受 auto_every 限制，必须真跑一次
+                _run_once(fin, limit=0, late=(fin != "尾盘终极扫"))
+                time.sleep(60)
+                continue
+
             if not p.get("auto_scan", True) or not is_trade_day(now) or not in_hours(p, now):
                 with _LOCK:
                     _STATE["next_run"] = None
@@ -232,21 +310,7 @@ def _loop():
                 time.sleep(30)
                 continue
 
-            today = now.strftime("%Y-%m-%d")
             every = int(p.get("auto_every", 300) or 0)
-            final_at = str(p.get("auto_final") or "14:50")
-            final_on = bool(p.get("auto_final_enabled", True))
-
-            # 尾盘终极扫：每天一次，跑完今天就不再重扫
-            if final_on and _STATE["final_done"] != today and _now_hm(now) >= _hm(final_at):
-                with _LOCK:
-                    _STATE["final_done"] = today
-                    _STATE["next_run"] = None
-                # 终极名单写成"当天有效"：今天就算白天没开过软件，14:50 之后打开
-                # 也要立刻扫一次（limit=0 表示不受 auto_every 限制）
-                _run_once("尾盘终极扫", limit=0)
-                time.sleep(60)
-                continue
 
             last = _STATE["last_run"]
             # 当天的"开盘首扫 / 尾盘确认"跑过就行；跨天自动失效，否则第二天白天

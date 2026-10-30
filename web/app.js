@@ -704,7 +704,13 @@ const AUTO = { st: null, timer: null, sig: '' };
 
 function fmtHm(s) {
   const t = String(s || '').trim();
-  return /^\d{1,2}:\d{2}/.test(t) ? t.slice(0, 5).padStart(5, '0') : '—';
+  // 两种入参都要认：
+  //   "13:05"                  —— next_run / 参数里的时间
+  //   "2026-10-30 13:00:00"    —— last_run（服务端给的是完整时间串）
+  // 以前只匹配第一种并在开头锚定，于是 last_run 永远显示成「上次 —」，
+  // 看起来像从来没跑过（其实一直在跑）。取第一个 HH:MM 片段即可。
+  const m = t.match(/(\d{1,2}:\d{2})/);
+  return m ? m[1].padStart(5, '0') : '—';
 }
 
 function autoText(st) {
@@ -716,8 +722,12 @@ function autoText(st) {
   if (!st.trade_day) return '今天休市，歇着';
   if (!st.in_hours) {
     const h0 = String(st.hours || p.auto_hours || '09:35-15:00').split('-')[0] || '09:35';
-    return st.last_run ? `收盘了 · 最后一次 ${fmtHm(st.last_run)}`
-      : `休息中 · ${h0} 开盘后自动开始`;
+    // 收盘后才补扫的那份，要说清是"补的"——否则晚上打开只会看到
+    // 「收盘了 · 最后一次 20:15」，时间对不上交易时段，让人以为出了问题
+    const late = /补扫/.test(String(st.last_reason || ''));
+    if (!st.last_run) return `休息中 · ${h0} 开盘后自动开始`;
+    return late ? `已补扫当天名单 · ${fmtHm(st.last_run)}`
+      : `收盘了 · 最后一次 ${fmtHm(st.last_run)}`;
   }
   // 上次是今天的才叫"上次"，隔夜的那个名单不算今天的状态
   const today = st.now ? String(st.now).slice(0, 10) : '';
@@ -1346,7 +1356,7 @@ function renderMemDates() {
   sel.innerHTML = MEM.days.map(d => {
     const t = (d.at || '').slice(5, 16);
     const nm = (d.names || []).slice(0, 2).join('、');
-    return `<option value="${d.date}" ${d.date === MEM.date ? 'selected' : ''}>${d.date}　留了 ${(d.hit || 0) + (d.watch || 0)} 只${nm ? '（' + esc(nm) + '…）' : ''}</option>`;
+    return `<option value="${d.date}" ${d.date === MEM.date ? 'selected' : ''}>${d.date}　留了 ${(d.hit || 0) + (d.watch || 0)} 只${d.late ? '（补扫）' : ''}${nm ? '（' + esc(nm) + '…）' : ''}</option>`;
   }).join('') || '<option value="">—</option>';
 }
 
@@ -1508,7 +1518,11 @@ function renderMemory() {
 
   // ---- 明细表
   const btxt = memBasisText(rv.basis);
-  $('#mem-meta').textContent = `${MEM.date} 选的 · ${items.length} 只${btxt ? ' · ' + btxt : ''}`;
+  // 收盘后补扫的那天：名单是按收盘价判定达标的（因为白天没开软件），
+  // 而买入价仍锚定 14:45 的分时 —— 两个口径不一致，必须写出来，
+  // 否则会以为这份名单等同于 14:45 当场跑出来的那份。
+  const lateTag = rv.late ? ' · 收盘后补扫' : '';
+  $('#mem-meta').textContent = `${MEM.date} 选的 · ${items.length} 只${btxt ? ' · ' + btxt : ''}${lateTag}`;
   // 说清买入价是怎么来的：这是回看涨跌幅的起点，差 0.5% 结论就会偏。
   // 但那天一只票都没选出时（只有观察名单），根本没有「买入价」可言，
   // 再挂一句「旧记录/快照价」会让人误以为数据有问题。
@@ -1523,6 +1537,9 @@ function renderMemory() {
     } else {
       paTxt = '买入价用的是当时的盘中快照（没记录 14:45 的分时）';
     }
+    // 补扫的日子：买入价虽然是 14:45 的，但"哪些票算达标"是按收盘价判的，
+    // 这句话不能省 —— 它决定了这份名单能不能和盘中那份直接对比。
+    if (rv.late) paTxt = `名单按收盘价判定（当天没开软件，收盘后补扫），${paTxt}`;
     paTxt += ' · ';
   }
   $('#mem-sub').textContent = `${paTxt}涨跌幅按前复权算（送转分红不算成暴跌）；最高/最低是选出后的区间极值`;
