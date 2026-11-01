@@ -66,6 +66,57 @@ def build_trades(params: dict, weights: dict, codes=None, limit: int = 40,
     return trades, daily, n
 
 
+def _metrics(curve: list, closed: list, initial_cash: float) -> dict:
+    """从资金曲线算绩效指标。**从第一笔交易那天开始算**。
+
+    为什么必须截断：curve 覆盖的是所有日线数据的并集（可能四年多），
+    而候选交易只出现在回测窗口内。拿全段当分母，年化会被摊薄成 1/4、
+    资金利用率也会被压到 3%（实测：真实 -2.59% 被算成年化 -0.63%）。
+    截断到"第一笔买入日"之后，分母才是真正经历过的行情长度。
+    """
+    if not curve:
+        return {"total": 0.0, "annual": 0.0, "mdd": 0.0, "sharpe": 0.0,
+                "calmar": 0.0, "util": 0.0, "win_rate": 0.0, "profit_factor": 0.0,
+                "days": 0, "_eq": np.array([initial_cash])}
+
+    buys = [c.get("buy_date") for c in closed if c.get("buy_date")]
+    i0 = 0
+    if buys:
+        first = min(buys)
+        i0 = next((i for i, c in enumerate(curve) if c[0] >= first), 0)
+    # 至少留 2 个点，否则算不出收益率
+    if len(curve) - i0 < 2:
+        i0 = max(0, len(curve) - 2)
+    seg = curve[i0:]
+
+    eq = np.array([c[1] for c in seg], dtype=float)
+    rets = np.diff(eq) / eq[:-1] if len(eq) > 1 else np.array([0.0])
+    n = len(eq)
+    base = eq[0] if n and eq[0] > 0 else initial_cash
+    total = float(eq[-1] / base - 1) if n else 0.0
+    annual = float((1 + total) ** (252.0 / n) - 1) if n > 1 and total > -1 else 0.0
+    peak = np.maximum.accumulate(eq)
+    dd = (eq - peak) / peak if n else np.array([0.0])
+    mdd = float(dd.min()) if n else 0.0
+    sd = float(rets.std(ddof=1)) if len(rets) > 1 else 0.0
+    sharpe = float(rets.mean() / sd * math.sqrt(252)) if sd > 0 else 0.0
+    calmar = float(annual / abs(mdd)) if mdd < 0 else 0.0
+
+    wins = [c for c in closed if c["ret_net"] > 0]
+    losses = [c for c in closed if c["ret_net"] <= 0]
+    gp = sum(c["pnl"] for c in wins)
+    gl = abs(sum(c["pnl"] for c in losses))
+    util = float(np.mean([c[2] / c[1] for c in seg if c[1] > 0])) if seg else 0.0
+
+    return {
+        "total": total, "annual": annual, "mdd": mdd, "sharpe": sharpe,
+        "calmar": calmar, "util": util,
+        "win_rate": len(wins) / len(closed) * 100 if closed else 0.0,
+        "profit_factor": (gp / gl) if gl > 0 else (99.0 if gp > 0 else 0.0),
+        "days": n, "_eq": eq,
+    }
+
+
 def run_portfolio(trades, daily, initial_cash: float = 1_000_000.0,
                   max_pos: int = 5, pos_pct: float = 0.2,
                   commission: float = 2.5e-4, min_comm: float = 5.0,
@@ -170,25 +221,12 @@ def run_portfolio(trades, daily, initial_cash: float = 1_000_000.0,
                        "sell_date": all_dates[-1]})
     positions.clear()
 
-    eq = np.array([c[1] for c in curve], dtype=float)
-    rets = np.diff(eq) / eq[:-1] if len(eq) > 1 else np.array([0.0])
-    n = len(eq)
-    total = eq[-1] / initial_cash - 1 if n else 0.0
-    annual = (1 + total) ** (252.0 / n) - 1 if n > 1 and total > -1 else 0.0
-    peak = np.maximum.accumulate(eq)
-    dd = (eq - peak) / peak if n else np.array([0.0])
-    mdd = float(dd.min()) if n else 0.0
-    sd = float(rets.std(ddof=1)) if len(rets) > 1 else 0.0
-    sharpe = float(rets.mean() / sd * math.sqrt(252)) if sd > 0 else 0.0
-    calmar = (annual / abs(mdd)) if mdd < 0 else 0.0
-
-    wins = [c for c in closed if c["ret_net"] > 0]
-    losses = [c for c in closed if c["ret_net"] <= 0]
-    win_rate = len(wins) / len(closed) * 100 if closed else 0.0
-    gp = sum(c["pnl"] for c in wins)
-    gl = abs(sum(c["pnl"] for c in losses))
-    pf = (gp / gl) if gl > 0 else (99.0 if gp > 0 else 0.0)
-    util = float(np.mean([c[2] / c[1] for c in curve if c[1] > 0])) if curve else 0.0
+    m = _metrics(curve, closed, initial_cash)
+    eq = m.pop("_eq")
+    n = m["days"]
+    total, annual, mdd = m["total"], m["annual"], m["mdd"]
+    sharpe, calmar, util = m["sharpe"], m["calmar"], m["util"]
+    win_rate, pf = m["win_rate"], m["profit_factor"]
 
     summary = {
         "initial_cash": initial_cash,
