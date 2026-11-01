@@ -572,6 +572,11 @@ td em.ts{
 }
 .c-act{width:56px}
 tr.empty td{text-align:center;color:var(--txt-3);padding:26px 0!important;cursor:default}
+/* 说明行里的行内链接：不要浏览器默认的蓝色下划线，跟着主题走。
+   用途：页面顶部那句话太短、说不了"为什么"，这里点一下跳到使用说明。 */
+.hintline .lnk{color:var(--accent-2);text-decoration:none;
+  border-bottom:1px dashed color-mix(in srgb,var(--accent-2) 55%,transparent)}
+.hintline .lnk:hover{color:var(--accent-soft);border-bottom-style:solid}
 /* 成绩单为空时的说明块：两行、左对齐。
    只给一句「明天起就会有」时，已经记了几天的人会以为功能坏了 ——
    这里要放确切数字，所以字号比普通空状态小一点，别喧宾夺主。 */
@@ -1124,6 +1129,9 @@ html[data-theme="light"] .wl .wv.sell{background:rgba(10,150,110,.08)}
    一行一条规则：编号 / 名称 / 阈值 / 状态。详细解释放进 title（hover 才出），
    不占据面板空间 —— 想看的人悬停就能看到，不想看的人不用滚动。 */
 .rules{display:flex;flex-direction:column;padding:2px 16px 6px}
+/* 使用说明里的补充说明行：紧跟在规则列表下面，别再套一层卡片 */
+.meth-note{padding:2px 18px 12px;font-size:12.5px;line-height:1.8;color:var(--txt-3)}
+.meth-note b{color:var(--txt-2);font-weight:600}
 .rule{display:grid;grid-template-columns:26px minmax(130px,auto) 1fr auto;
   gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line-2)}
 .rule:last-child{border-bottom:0}

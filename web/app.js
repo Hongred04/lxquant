@@ -213,7 +213,7 @@ const TITLES = { screen: '选股', watch: '盯盘 / 自选', memory: '记忆', o
 /* 二级页层数：0 = 主页面（侧栏常驻、整块内容一起滚）；
    1 = 从主页面钻进去的工具页（信号检验 / 模拟账户 / 使用说明 / 参数设置），
        顶部只留一条面包屑 + 吸顶的工具条，别让人迷失在长表格里 */
-const LEVEL = { screen: 0, watch: 0, memory: 1, overnight: 1, backtest: 1, portfolio: 1, method: 1, settings: 1 };
+const LEVEL = { screen: 0, overnight: 0, watch: 0, memory: 1, backtest: 1, portfolio: 1, method: 1, settings: 1 };
 const REHOME = Object.keys(LEVEL).filter(v => LEVEL[v] === 0);   // 操作台：用 app-main 把二级页的头部还回去
 // 顶栏副标题：默认留空。以前每页都挂一句「这页是干什么的」，
 // 但页面标题（选股 / 自选 / 记忆 / 信号检验…）本身已经说清了，

@@ -230,11 +230,14 @@ def do_open(today: str, snap=None) -> int:
     return got
 
 
-def do_settle(today: str, snap=None) -> int:
-    """收盘：按收盘价平掉持仓。收盘仍一字跌停的顺延到下一日。"""
+def do_settle(day: str, snap=None) -> int:
+    """按 day 那天的收盘价平掉持仓。收盘仍一字跌停的顺延到下一日。
+
+    `day` 不一定是"今天"：周末打开软件时是上周五，开盘前是上一个交易日。
+    """
     st = _load()
     if not st["open"]:
-        st["marks"]["settle"] = today
+        st["marks"]["settle"] = day
         _save(st)
         return 0
     if snap is None:
@@ -266,27 +269,30 @@ def do_settle(today: str, snap=None) -> int:
         ret = (px / it["open"] - 1) * 100 if it["open"] else 0.0
         _append_trade({
             "signal_date": it["signal_date"], "buy_date": it["buy_date"],
-            "sell_date": today, "code": it["code"], "name": it.get("name", ""),
+            "sell_date": day, "code": it["code"], "name": it.get("name", ""),
             "streak": it.get("streak"), "open": it["open"], "close": round(px, 3),
             "ret": round(ret, 2), "status": "done",
             "deferred": it.get("deferred") or 0, "flag": it.get("flag") or "",
         })
         closed += 1
     st["open"] = keep
-    st["marks"]["settle"] = today
+    st["marks"]["settle"] = day
     _save(st)
     return closed
 
 
-def do_scan(today: str, snap=None) -> list:
-    """收盘后：更新今日涨停/连板，找出今天的「首阴」，作为明日待买。"""
+def do_scan(day: str, snap=None) -> list:
+    """扫 day 那天的收盘数据：更新涨停/连板，找出当天的「首阴」，作为**次日**待买。
+
+    `day` 是信号日，不一定是"今天"（周末补跑时是上周五）。
+    """
     st = _load()
     if snap is None:
         from . import store
         snap = store.get_list()
 
-    hist = ensure_history(today)
-    prev_days = [d for d in hist if d < today]
+    hist = ensure_history(day)
+    prev_days = [d for d in hist if d < day]
     prev_day = max(prev_days) if prev_days else ""
 
     today_lu = {}
@@ -316,7 +322,7 @@ def do_scan(today: str, snap=None) -> list:
         if px > op * YIN_MAX:
             continue
         fresh.append({
-            "code": code, "name": nm, "signal_date": today,
+            "code": code, "name": nm, "signal_date": day,
             "streak": s, "signal_close": round(px, 2),
             "open": round(op, 2), "chg": round(chg * 100, 2),
         })
@@ -327,17 +333,17 @@ def do_scan(today: str, snap=None) -> list:
     try:
         from . import emotion as _emo
         if fresh:
-            _emo.enrich(fresh, today, prev_day)
-        emo = _emo.stats(_emo.zt_pool(today))
+            _emo.enrich(fresh, day, prev_day)
+        emo = _emo.stats(_emo.zt_pool(day))
     except Exception:
         pass
 
-    hist[today] = today_lu
+    hist[day] = today_lu
     for d in sorted(hist)[:-HISTORY_KEEP]:
         hist.pop(d, None)
     st["limitup"] = hist
     if emo:
-        st.setdefault("emotion", {})[today] = emo
+        st.setdefault("emotion", {})[day] = emo
         for d in sorted(st["emotion"])[:-10]:
             st["emotion"].pop(d, None)
 
@@ -345,7 +351,7 @@ def do_scan(today: str, snap=None) -> list:
     # 注意：同一天重复生成名单（手动补跑、或调度重入）不能算错过 ——
     # signal_date 等于本次 ref 的，说明是同一批，直接替换即可。
     for it in st["pending"]:
-        if str(it.get("signal_date") or "") >= today:
+        if str(it.get("signal_date") or "") >= day:
             continue
         _append_trade({
             "signal_date": it["signal_date"], "buy_date": "", "sell_date": "",
@@ -355,7 +361,7 @@ def do_scan(today: str, snap=None) -> list:
             "flag": "开盘时没记录成交（软件未运行或没下单）",
         })
     st["pending"] = sorted(fresh, key=lambda x: -int(x.get("streak") or 0))
-    st["marks"]["scan"] = today
+    st["marks"]["scan"] = day
     _save(st)
     return st["pending"]
 
