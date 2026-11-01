@@ -193,6 +193,7 @@ const S = {
   btResult: null,
   pf: null,
   detail: null,
+  ovn: null,          // 隔夜低吸（首阴套利）的账本，和主策略完全独立
   busy: {},
   /* 「值得盯着」弹窗（S.watchModalOpen）和它的筛选（S.watchFilter：all / near） */
   watchModalOpen: false,
@@ -208,11 +209,11 @@ const S = {
 };
 
 /* ------------------------------------------------ 视图切换 */
-const TITLES = { screen: '选股', watch: '盯盘 / 自选', memory: '记忆', backtest: '信号检验', portfolio: '模拟账户', method: '使用说明', settings: '参数设置' };
+const TITLES = { screen: '选股', watch: '盯盘 / 自选', memory: '记忆', overnight: '隔夜低吸', backtest: '信号检验', portfolio: '模拟账户', method: '使用说明', settings: '参数设置' };
 /* 二级页层数：0 = 主页面（侧栏常驻、整块内容一起滚）；
    1 = 从主页面钻进去的工具页（信号检验 / 模拟账户 / 使用说明 / 参数设置），
        顶部只留一条面包屑 + 吸顶的工具条，别让人迷失在长表格里 */
-const LEVEL = { screen: 0, watch: 0, memory: 1, backtest: 1, portfolio: 1, method: 1, settings: 1 };
+const LEVEL = { screen: 0, watch: 0, memory: 1, overnight: 1, backtest: 1, portfolio: 1, method: 1, settings: 1 };
 const REHOME = Object.keys(LEVEL).filter(v => LEVEL[v] === 0);   // 操作台：用 app-main 把二级页的头部还回去
 // 顶栏副标题：默认留空。以前每页都挂一句「这页是干什么的」，
 // 但页面标题（选股 / 自选 / 记忆 / 信号检验…）本身已经说清了，
@@ -289,6 +290,7 @@ function switchView(v) {
   if (v === 'backtest') { try { paintBtCharts(); renderBtEmpty(); } catch (_) { } }
   if (v === 'portfolio') { try { paintPfCharts(); renderPfEmpty(); } catch (_) { } }
   if (v === 'memory') { try { loadMemory(); } catch (_) { } }
+  if (v === 'overnight') { try { loadOvernight(); } catch (_) { } }
 }
 
 /* ================================================================ 选股 */
@@ -3425,6 +3427,148 @@ async function saveSettings() {
       if (el) el.textContent = '参数刚改过，当前名单还是用旧条件算的 —— 点「立即选股」重新跑一次';
     }
   } catch (e) { toast('没保存成功：' + e.message, true); }
+}
+
+/* ================================================================ 隔夜低吸（首阴套利）
+   和「选股」页那套完全独立的一条线：
+     那边 14:45 决策、按收盘价买、持有几天跌破均价线才走；
+     这边收盘后出名单、次日开盘买、当天收盘必须卖，不留隔夜。
+   账本在 data/overnight/，不并进 data/memory/ —— 持有期不同，混在一起算总账两边都失真。 */
+async function loadOvernight() {
+  const busy = $('#ovn-loading');
+  if (busy) busy.hidden = false;
+  try { S.ovn = await api('/api/overnight'); } catch (_) { S.ovn = null; }
+  if (busy) busy.hidden = true;
+  renderOvernight();
+}
+
+async function rescanOvernight() {
+  const btn = $('#btn-ovn-scan');
+  const old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>生成中…'; }
+  try {
+    S.ovn = await api('/api/overnight/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    toast('已按最新行情重新生成明日名单');
+  } catch (e) {
+    toast('生成失败：' + (e && e.message ? e.message : e), true);
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = old; }
+  renderOvernight();
+}
+
+function renderOvernight() {
+  const d = S.ovn;
+  const st = (d && d.stats) || {};
+  const pend = (d && d.pending) || [];
+  const open = (d && d.open) || [];
+  const recent = (d && d.recent) || [];
+  const show = (sel, on) => { const el = $(sel); if (el) el.hidden = !on; };
+
+  const b = $('#btn-ovn-scan');
+  if (b && !b.onclick) b.onclick = rescanOvernight;
+
+  if (!d) {
+    show('#ovn-empty', true);
+    show('#ovn-kpis', false);
+    ['#ovn-pending', '#ovn-open', '#ovn-recent'].forEach(s => show(s, false));
+    const m = $('#ovn-meta'); if (m) m.textContent = '读取失败，刷新一下试试';
+    return;
+  }
+  show('#ovn-empty', false);
+
+  const pct = v => (v == null ? '—' : (v > 0 ? '+' : '') + fmt(v, 2) + '%');
+  const cls = v => (v == null ? '' : (v > 0 ? 'up' : (v < 0 ? 'down' : '')));
+
+  $('#ovn-kpis').innerHTML = [
+    { k: '明日待买', v: pend.length ? pend.length + ' 只' : '0 只',
+      s: pend.length ? '次日 9:25 挂单' : '明天没有符合条件的票' },
+    { k: '买了还没卖', v: open.length ? open.length + ' 只' : '0 只',
+      s: open.length ? '收盘前必须平掉' : '当前没有持仓' },
+    { k: '累计已平仓', v: (st.n || 0) + ' 笔',
+      s: st.missed ? '另有 ' + st.missed + ' 次信号没执行' : '按开盘买、收盘卖' },
+    { k: '胜率', v: st.win_rate == null ? '—' : fmt(st.win_rate, 1) + '%',
+      s: st.n ? '共 ' + st.n + ' 笔' : '还没有成交' },
+    { k: '平均每笔', v: st.avg == null ? '—' : pct(st.avg),
+      c: cls(st.avg), s: st.med == null ? '' : '中位 ' + pct(st.med) },
+    { k: '盈亏比', v: st.payoff == null ? '—' : fmt(st.payoff, 2),
+      s: st.payoff == null ? '样本不够' : '赚的比亏的多多少倍' },
+  ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c || ''}">${x.v}</div><div class="s">${x.s || ''}</div></div>`).join('');
+
+  // 板块格子：有板块就说「板块 · 今天同板块几只涨停」，没有就老实说没有。
+  // 同板块今天还有票在涨停 = 题材没死，明天低开才有承接 —— 这是"题材核心"的唯一可行代理。
+  // 炸板次数是判断"板结不结实"的唯一直接证据：
+  // 实测 4 连板的光洋股份当天炸板 17 次、封单只剩 853 万、换手 27.9% —— 弱板。
+  // 弱板的首阴次日反弹也弱，值得在名单上直接标出来。
+  const zbcTag = x => {
+    const n = Number(x.zbc) || 0;
+    if (!n) return '';
+    return `<em class="ts" title="上一个交易日封板期间被打开 ${n} 次，次数越多板越弱">炸${n}次</em>`;
+  };
+
+  const boardCell = x => {
+    if (!x.board) return '<span class="muted">—</span>';
+    const n = Number(x.n_board) || 0;
+    return `${esc(x.board)}<span class="muted">${n ? ' · 今日 ' + n + ' 只涨停' : ' · 今日该板块无涨停'}</span>`;
+  };
+
+  const marks = d.marks || {}, pa = d.params || {};
+  const meta = $('#ovn-meta');
+  if (meta) {
+    meta.textContent = `上次生成 ${marks.scan || '还没跑过'}　·　连板 ≥${pa.min_streak}、实体阴线 ≥1%`
+      + `　·　执行率 ${st.exec_rate == null ? '—' : fmt(st.exec_rate, 0) + '%'}`
+      + (d.emotion && d.emotion.n
+        ? `　·　${d.emotion.date} 涨停 ${d.emotion.n} 只、最高 ${d.emotion.max_lbc} 板`
+        : '');
+  }
+
+  // ---- 明日待买（核心输出，永远显示）
+  show('#ovn-pending', true);
+  $('#tb-ovn-pending').innerHTML = pend.length
+    ? pend.map(x => `<tr>
+        <td class="code">${esc(x.code)}</td>
+        <td class="name">${esc(x.name || '')}</td>
+        <td class="num">${x.streak == null ? '—' : x.streak}${zbcTag(x)}</td>
+        <td>${boardCell(x)}</td>
+        <td class="num">${x.signal_close == null ? '—' : fmt(x.signal_close)}</td>
+        <td class="num ${cls(x.chg)}">${x.chg == null ? '—' : fmt(x.chg, 2) + '%'}</td>
+        <td class="muted">9:25 集合竞价挂市价</td>
+      </tr>`).join('')
+    : '<tr class="empty"><td colspan="7">明天没有符合条件的票 —— 连板 ≥3 且今天收实体阴线的，全市场一只都没有</td></tr>';
+
+  // ---- 已买待卖
+  show('#ovn-open', open.length > 0);
+  if (open.length) {
+    $('#tb-ovn-open').innerHTML = open.map(x => `<tr>
+        <td class="code">${esc(x.code)}</td>
+        <td class="name">${esc(x.name || '')}</td>
+        <td>${esc(x.signal_date || '')}</td>
+        <td>${esc(x.buy_date || '')}</td>
+        <td class="num">${x.open == null ? '—' : fmt(x.open)}</td>
+        <td class="muted">${esc(x.flag || (x.deferred ? '跌停卖不掉，顺延 ' + x.deferred + ' 天' : '持有中，收盘卖'))}</td>
+      </tr>`).join('');
+  }
+
+  // ---- 最近记录
+  show('#ovn-recent', recent.length > 0);
+  if (recent.length) {
+    const sub = $('#ovn-recent-sub');
+    if (sub) sub.textContent = `最近 ${recent.length} 笔 · 错过的不算收益，只用来算执行率`;
+    $('#tb-ovn-recent').innerHTML = recent.map(x => {
+      const missed = x.status === 'missed';
+      return `<tr${missed ? ' class="pt"' : ''}>
+        <td>${esc(x.buy_date || x.signal_date || '')}</td>
+        <td class="code">${esc(x.code)}</td>
+        <td class="name">${esc(x.name || '')}</td>
+        <td class="num">${x.streak == null ? '—' : x.streak}</td>
+        <td class="num">${x.open == null ? '—' : fmt(x.open)}</td>
+        <td class="num">${x.close == null ? '—' : fmt(x.close)}</td>
+        <td class="num ${cls(x.ret)}">${missed ? '—' : pct(x.ret)}</td>
+        <td class="muted">${missed ? '错过：开盘没下单' : esc(x.flag || '')}</td>
+      </tr>`;
+    }).join('');
+  }
 }
 
 /* ================================================================ 初始化 */

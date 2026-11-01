@@ -454,6 +454,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, **auto.status(),
                                    "preview_now": auto._preview_at(cfg["params"], _dt.now()),
                                    "tail_from": cfg["params"].get("tail_from", "14:30")})
+            if p == "/api/overnight":
+                # 隔夜低吸（首阴套利）：待买 / 持仓 / 历史 / 统计，一次给全。
+                # 和主策略完全分开的账本 —— 持有期只有 1 天，混在一起算会失真。
+                from . import overnight
+                return self._json({"ok": True, **overnight.view()})
+
             if p == "/api/log":
                 # 运行日志：默认给最近 120 行；errors=1 只要异常行。
                 # 出问题时（"昨天怎么没记录"这类）这是最快的定位入口。
@@ -620,6 +626,15 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 return self._json({"ok": True, **cfg})
+            if p == "/api/overnight/scan":
+                # 手动补跑：软件没开过、错过了 15:05，可以在这里补一份明日名单。
+                # 它会先结算今天该平的仓，再扫今天的首阴，所以重复点也不会重复记账。
+                from . import overnight
+                ref = overnight.ref_day()      # 周末/开盘前也能补上一份，不会挂错日期
+                closed = overnight.do_settle(ref)
+                pend = overnight.do_scan(ref)
+                return self._json({"ok": True, "closed": closed,
+                                   "pending": pend, **overnight.view()})
             if p == "/api/cache/clear":
                 n = store.clear_cache(b.get("kind"))
                 return self._json({"ok": True, "removed": n, "cache": store.cache_info()})

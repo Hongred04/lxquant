@@ -27,6 +27,7 @@
       <button class="ni" data-view="backtest"><i data-ic="chart"></i><span>信号检验</span></button>
       <button class="ni" data-view="portfolio"><i data-ic="wallet"></i><span>模拟账户</span></button>
       <button class="ni sub" data-view="memory"><i data-ic="memory"></i><span>记忆</span></button>
+      <button class="ni sub" data-view="overnight"><i data-ic="moon"></i><span>隔夜低吸</span></button>
       <button class="ni sub" data-view="method"><i data-ic="book"></i><span>使用说明</span></button>
       <button class="ni sub" data-view="settings"><i data-ic="sliders"></i><span>参数设置</span></button>
     </nav>
@@ -429,6 +430,77 @@
     </section>
 
     <!-- ---------- 使用说明 ---------- -->
+    <section class="view" id="view-overnight">
+      <div class="hd">
+      <header class="topbar"></header>
+      <div class="toolbar">
+        <button class="btn ghost" id="btn-ovn-scan"><i data-ic="reset"></i>重新生成明日名单</button>
+        <span class="spacer"></span>
+        <span class="muted" id="ovn-meta">—</span>
+      </div>
+
+      <!-- 这一页的规矩必须写在最上面，否则用户会按「选股」那套习惯当天收盘买，
+           而那正好是这套策略唯一亏钱的买法（实测 -1.28%） -->
+      <div class="hintline">
+        收盘后选「连板 ≥3 天、当天第一根实体阴线」的票，<b>次日开盘价买入、当天收盘卖出</b>，不留隔夜。
+        必须 9:25 集合竞价挂单才拿得到开盘价 —— 实测 9:35 之后再买，前 5 分钟均价已经高了 0.45~0.95%，
+        收益直接少一截。这条线和「选股」页那套<b>分开记账</b>：那套 14:45 决策、持有几天，这套只管隔夜一天。
+      </div>
+
+      <div class="kpis" id="ovn-kpis"></div>
+
+      <div class="empty-state" id="ovn-loading" hidden>
+        <b><span class="spin"></span> 正在读隔夜低吸的账本…</b>
+      </div>
+
+      <div class="empty-state" id="ovn-empty" hidden>
+        <b>还没有名单</b>
+        <span>每个交易日收盘后（15:05）会自动生成明日名单；软件没开过就点上面的按钮补一份。</span>
+      </div>
+
+      <div class="panel" id="ovn-pending" hidden>
+        <div class="ph"><b>明日待买</b><span class="muted">次日 9:25 集合竞价挂单，成交价就是开盘价</span></div>
+        <div class="tablewrap" style="max-height:300px">
+          <table class="grid">
+            <thead><tr>
+              <th>代码</th><th>名称</th><th class="num">连板</th>
+              <th>板块（今天同板块涨停数）</th>
+              <th class="num">今天收盘</th><th class="num">今天跌幅</th><th>怎么买</th>
+            </tr></thead>
+            <tbody id="tb-ovn-pending"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="ovn-open" hidden>
+        <div class="ph"><b>已买入 · 等收盘卖</b><span class="muted">当天必须平掉，不留隔夜</span></div>
+        <div class="tablewrap" style="max-height:240px">
+          <table class="grid">
+            <thead><tr>
+              <th>代码</th><th>名称</th><th>信号日</th><th>买入日</th>
+              <th class="num">买入价（开盘）</th><th>状态</th>
+            </tr></thead>
+            <tbody id="tb-ovn-open"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="ovn-recent" hidden>
+        <div class="ph"><b>最近记录</b><span class="muted" id="ovn-recent-sub"></span></div>
+        <div class="tablewrap" style="max-height:380px">
+          <table class="grid">
+            <thead><tr>
+              <th>买入日</th><th>代码</th><th>名称</th><th class="num">连板</th>
+              <th class="num">买入价</th><th class="num">卖出价</th>
+              <th class="num">收益</th><th>说明</th>
+            </tr></thead>
+            <tbody id="tb-ovn-recent"></tbody>
+          </table>
+        </div>
+      </div>
+      </div>
+    </section>
+
     <section class="view" id="view-method">
       <div class="hd">
       <header class="topbar"></header>

@@ -17,6 +17,7 @@ data/watchlist.json
 
 # 选股记忆（本机积累的回看记录，换机器重新开始攒）
 data/memory/
+data/overnight/
 
 # Python 缓存
 __pycache__/
