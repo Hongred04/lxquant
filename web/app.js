@@ -3468,6 +3468,13 @@ function renderOvernight() {
 
   const b = $('#btn-ovn-scan');
   if (b && !b.onclick) b.onclick = rescanOvernight;
+  // 导出的 CSV 就是账本本身：验证"弱板是不是更差"这类假设得在表格里分组，
+  // 界面上只能看单笔，点不出结论。
+  const bx = $('#btn-ovn-export');
+  if (bx && !bx.onclick) bx.onclick = () => {
+    if (!(d.recent || []).length) { toast('还没有成交记录，导出来只有表头', true); return; }
+    location.href = '/api/overnight/export';
+  };
 
   if (!d) {
     show('#ovn-empty', true);
@@ -3537,6 +3544,14 @@ function renderOvernight() {
       </tr>`).join('')
     : '<tr class="empty"><td colspan="7">明天没有符合条件的票 —— 连板 ≥3 且今天收实体阴线的，全市场一只都没有</td></tr>';
 
+  // 持仓状态：补记的要说清"几点抓的"，否则分不清是盘中真做了决定还是事后补的
+  const openState = x => {
+    if (x.deferred) return '跌停卖不掉，顺延 ' + x.deferred + ' 天';
+    const at = String(x.captured_at || '');
+    if (at && x.on_time === false) return `补记于 ${at} · 收盘卖`;
+    return '开盘记录 · 收盘卖';
+  };
+
   // ---- 已买待卖
   show('#ovn-open', open.length > 0);
   if (open.length) {
@@ -3546,7 +3561,7 @@ function renderOvernight() {
         <td>${esc(x.signal_date || '')}</td>
         <td>${esc(x.buy_date || '')}</td>
         <td class="num">${x.open == null ? '—' : fmt(x.open)}</td>
-        <td class="muted">${esc(x.flag || (x.deferred ? '跌停卖不掉，顺延 ' + x.deferred + ' 天' : '持有中，收盘卖'))}</td>
+        <td class="muted">${esc(x.flag || openState(x))}</td>
       </tr>`).join('');
   }
 
@@ -3554,7 +3569,7 @@ function renderOvernight() {
   show('#ovn-recent', recent.length > 0);
   if (recent.length) {
     const sub = $('#ovn-recent-sub');
-    if (sub) sub.textContent = `最近 ${recent.length} 笔 · 错过的不算收益，只用来算执行率`;
+    if (sub) sub.textContent = `最近 ${recent.length} 笔 · 错过的不算收益，只用来算执行率 · 可导出 CSV 分组验证`;
     $('#tb-ovn-recent').innerHTML = recent.map(x => {
       const missed = x.status === 'missed';
       return `<tr${missed ? ' class="pt"' : ''}>

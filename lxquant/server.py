@@ -350,6 +350,24 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
         self._send(code, dumps(obj).encode("utf-8"))
 
+    def _file(self, name: str, text: str, ctype="text/csv; charset=utf-8"):
+        """以附件形式发一个文本文件（CSV 导出用）。
+
+        _send 写不了 Content-Disposition，所以单独走一遍。
+        带 UTF-8 BOM：不然 Excel 打开中文列名会变乱码，而这文件就是给人用 Excel 看的。
+        """
+        body = ("\ufeff" + text).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def _err(self, msg, code=400):
         self._json({"ok": False, "error": str(msg)}, code)
 
@@ -459,6 +477,13 @@ class Handler(BaseHTTPRequestHandler):
                 # 和主策略完全分开的账本 —— 持有期只有 1 天，混在一起算会失真。
                 from . import overnight
                 return self._json({"ok": True, **overnight.view()})
+
+            if p == "/api/overnight/export":
+                # 账本导出成 CSV。要验证"弱板是不是更差"这类假设，必须在表格里分组算，
+                # 界面上点不出结论。
+                from . import overnight
+                name = f"overnight_{time.strftime('%Y%m%d')}.csv"
+                return self._file(name, overnight.export_csv())
 
             if p == "/api/log":
                 # 运行日志：默认给最近 120 行；errors=1 只要异常行。

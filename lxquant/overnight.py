@@ -38,7 +38,11 @@ from .config import DATA_DIR
 MIN_STREAK = 3          # 前面至少 3 个连板才叫"龙头"，1~2 个板的首阴样本质量差
 YIN_MAX = 0.99          # 收盘 ≤ 开盘 × 0.99：实体阴线至少 1%，避免十字星误判
 HISTORY_KEEP = 15       # 连板历史保留天数（≥ MIN_STREAK 就够，留余量）
-OPEN_FROM, OPEN_TO = "09:26", "10:00"   # 集合竞价结束后才拿得到开盘价
+# 集合竞价结束后才拿得到开盘价；**开盘价全天不变**，所以收盘前补记也是准的。
+# 窗口放宽到 14:55 是为了收集样本：软件 11 点才打开，也能补上当天这条记录。
+# 但会如实记下"几点抓的"，10:00 之后抓的标成补记 —— 验证执行率时要能区分。
+OPEN_FROM, OPEN_TO = "09:26", "14:55"
+ON_TIME_BY = "10:00"
 SETTLE_AT = "15:05"     # 收盘价落定后才结算
 
 DIR = DATA_DIR / "overnight"
@@ -216,11 +220,21 @@ def do_open(today: str, snap=None) -> int:
         # 一字跌停开：能买，但当天大概率卖不掉 → 仍然记录，交给结算时判顺延
         one_word = (abs(float(r.get("high") or 0) - float(r.get("low") or 0)) < 1e-6
                     and o <= prev * (1 - ltype + limitup.TOL))
+        # 信号日的证据必须整份带进来：板块、同板块涨停数、炸板次数、封板时间。
+        # 只留买卖价的话，事后没法回答"弱板是不是更差""板块有承接是不是更好" ——
+        # 而这两个问题正是这套策略接下来要验证的东西。
         st["open"].append({
             "code": str(it["code"]), "name": it.get("name", ""),
             "signal_date": it["signal_date"], "buy_date": today,
             "streak": it.get("streak"), "signal_close": it.get("signal_close"),
             "open": round(o, 3), "deferred": 0,
+            "board": it.get("board") or "", "n_board": it.get("n_board"),
+            "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
+            "lbc_em": it.get("lbc_em"),
+            # 抓取时刻：10:00 前算准时。补记的记录价格仍然准确（开盘价不变），
+            # 但它证明不了"你那天真的在盘中做了决定"，统计执行率时要分开算。
+            "captured_at": time.strftime("%H:%M"),
+            "on_time": time.strftime("%H:%M") <= ON_TIME_BY,
             "flag": "一字跌停开盘" if one_word else "",
         })
         got += 1
@@ -267,11 +281,20 @@ def do_settle(day: str, snap=None) -> int:
             # 扛满 3 天也没跑掉：按收盘价强制结账，并如实标注
             it["flag"] = (it.get("flag") or "") + " 连续跌停未卖出"
         ret = (px / it["open"] - 1) * 100 if it["open"] else 0.0
+        sc = it.get("signal_close") or 0
         _append_trade({
             "signal_date": it["signal_date"], "buy_date": it["buy_date"],
             "sell_date": day, "code": it["code"], "name": it.get("name", ""),
-            "streak": it.get("streak"), "open": it["open"], "close": round(px, 3),
+            "streak": it.get("streak"),
+            # 买入价 = 次日开盘价；信号日收盘也留着 —— 两者相除就是"低开幅度"，
+            # 而低开幅度是这套策略最核心的自变量（实测：低开越深，反弹越强）。
+            "signal_close": sc, "open": it["open"], "close": round(px, 3),
+            "gap": round((it["open"] / sc - 1) * 100, 2) if sc else None,
+            "hold_days": _days_between(it["buy_date"], day),
             "ret": round(ret, 2), "status": "done",
+            "board": it.get("board") or "", "n_board": it.get("n_board"),
+            "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
+            "captured_at": it.get("captured_at") or "", "on_time": it.get("on_time"),
             "deferred": it.get("deferred") or 0, "flag": it.get("flag") or "",
         })
         closed += 1
@@ -356,8 +379,11 @@ def do_scan(day: str, snap=None) -> list:
         _append_trade({
             "signal_date": it["signal_date"], "buy_date": "", "sell_date": "",
             "code": it["code"], "name": it.get("name", ""),
-            "streak": it.get("streak"), "open": None, "close": None,
+            "streak": it.get("streak"), "signal_close": it.get("signal_close"),
+            "open": None, "close": None, "gap": None, "hold_days": None,
             "ret": None, "status": "missed", "deferred": 0,
+            "board": it.get("board") or "", "n_board": it.get("n_board"),
+            "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
             "flag": "开盘时没记录成交（软件未运行或没下单）",
         })
     st["pending"] = sorted(fresh, key=lambda x: -int(x.get("streak") or 0))
@@ -425,6 +451,50 @@ def tick(now: datetime | None = None) -> str:
         p = do_scan(ref)
         acted = (acted + " " if acted else "") + f"settle:{c} scan:{len(p)}"
     return acted
+
+
+def _days_between(a: str, b: str) -> int | None:
+    """两个交易日之间相差几天（自然日）。用不上日历，只用来记录"扛了多久"。"""
+    try:
+        d1 = datetime.strptime(str(a)[:10], "%Y-%m-%d")
+        d2 = datetime.strptime(str(b)[:10], "%Y-%m-%d")
+        return max((d2 - d1).days, 0)
+    except Exception:
+        return None
+
+
+CSV_FIELDS = [
+    ("signal_date", "信号日"), ("buy_date", "买入日"), ("sell_date", "卖出日"),
+    ("code", "代码"), ("name", "名称"), ("streak", "连板"),
+    ("board", "板块"), ("n_board", "同板块当日涨停数"), ("zbc", "炸板次数"),
+    ("fbt", "首封时间"), ("signal_close", "信号日收盘"), ("open", "买入价(开盘)"),
+    ("gap", "低开幅度%"), ("close", "卖出价"), ("ret", "收益%"),
+    ("hold_days", "持天数"), ("captured_at", "记录时刻"), ("on_time", "是否准时"),
+    ("status", "状态"), ("deferred", "顺延天数"), ("flag", "备注"),
+]
+
+
+def export_csv() -> str:
+    """把账本导成 CSV（带 BOM，Excel 直接打开不乱码）。
+
+    为什么要有这个：验证"弱板是不是更差""低开越深反弹越强"这类假设，
+    在界面里点来点去没用，得拿一堆记录去分组算。CSV 是门槛最低的形式 ——
+    Excel、pandas、甚至手机上的表格都能开。
+    """
+    ts = _read_trades()
+    lines = [",".join(h for _, h in CSV_FIELDS)]
+    for t in ts:
+        row = []
+        for k, _ in CSV_FIELDS:
+            v = t.get(k)
+            if v is None:
+                row.append("")
+            elif isinstance(v, str) and ("," in v or '"' in v):
+                row.append('"' + v.replace('"', '""') + '"')
+            else:
+                row.append(str(v))
+        lines.append(",".join(row))
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- 视图 / 统计

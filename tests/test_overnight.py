@@ -210,3 +210,55 @@ def test_ref_day_uses_last_closed_session():
     assert overnight.ref_day(datetime(2026, 10, 31, 22, 0)) == "2026-10-30"  # 周六
     assert overnight.ref_day(datetime(2026, 11, 2, 9, 0)) == "2026-10-30"    # 周一开盘前
     assert overnight.ref_day(datetime(2026, 11, 2, 15, 30)) == "2026-11-02"  # 周一收盘后
+
+
+def test_trade_record_keeps_signal_evidence():
+    """成交记录必须自带信号日的全部证据 —— 否则事后没法验证
+    「弱板是不是更差」「低开越深是不是弹得越猛」。"""
+    with Env(HIST):
+        st = overnight._load()
+        st["pending"] = [{
+            "code": "002708", "name": "光洋股份", "signal_date": TODAY,
+            "streak": 4, "signal_close": 20.0, "board": "汽车零部",
+            "n_board": 3, "zbc": 17, "fbt": "09:25:00", "lbc_em": 4,
+        }]
+        overnight._save(st)
+
+        # 次日开盘 19.0（低开 5%），当天收盘 19.6
+        overnight.do_open(NEXT, _snap([_row("002708", "光洋股份", 19.0, 19.0, 20.0)]))
+        held = overnight._load()["open"][0]
+        assert held["board"] == "汽车零部" and held["zbc"] == 17, held
+
+        overnight.do_settle(NEXT, _snap([_row("002708", "光洋股份", 19.6, 19.0, 20.0)]))
+        t = overnight._read_trades()[0]
+        assert t["signal_close"] == 20.0
+        assert abs(t["gap"] - (-5.0)) < 0.01, t["gap"]          # 低开幅度 = 19/20-1
+        assert t["board"] == "汽车零部" and t["zbc"] == 17
+        assert t["hold_days"] == 0                              # 同日买同日卖
+        assert abs(t["ret"] - 3.16) < 0.05, t["ret"]            # 19.6/19-1
+
+
+def test_export_csv_headers_and_rows():
+    with Env(HIST):
+        overnight._append_trade({
+            "signal_date": TODAY, "buy_date": NEXT, "sell_date": NEXT,
+            "code": "002708", "name": "光洋股份", "streak": 4,
+            "board": "汽车零部", "n_board": 0, "zbc": 17,
+            "signal_close": 20.0, "open": 19.0, "gap": -5.0,
+            "close": 19.6, "ret": 3.16, "hold_days": 0,
+            "status": "done", "deferred": 0, "flag": "",
+        })
+        csv = overnight.export_csv()
+        lines = [x for x in csv.strip().split("\n") if x]
+        assert "代码" in lines[0] and "低开幅度%" in lines[0], lines[0]
+        assert len(lines) == 2
+        assert "002708" in lines[1] and "汽车零部" in lines[1]
+
+
+def test_export_csv_quotes_commas():
+    with Env(HIST):
+        overnight._append_trade({"code": "000001", "name": 'A,B"公司',
+                                 "status": "missed", "flag": "x,y"})
+        csv = overnight.export_csv()
+        row = csv.strip().split("\n")[1]
+        assert '"A,B""公司"' in row, row
