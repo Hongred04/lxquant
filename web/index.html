@@ -474,13 +474,17 @@
         </div>
       </div>
 
+      <!-- 这一块记的是「今天的信号」，不是「你的成交」。
+           软件没法知道你下没下单（券商不会告诉我们），所以买没买由你点一下；
+           不管点不点，开盘价和影子收益都会留下 —— 样本不能因为没下单就消失。 -->
       <div class="panel" id="ovn-open" hidden>
-        <div class="ph"><b>已买入 · 等收盘卖</b><span class="muted">当天必须平掉，不留隔夜</span></div>
-        <div class="tablewrap" style="max-height:240px">
+        <div class="ph"><b>今日信号</b><span class="muted">买没买由你标，价格和收益照记 —— 不标也留档</span></div>
+        <div class="tablewrap" style="max-height:260px">
           <table class="grid">
             <thead><tr>
-              <th>代码</th><th>名称</th><th>信号日</th><th>买入日</th>
-              <th class="num">买入价（开盘）</th><th>状态</th>
+              <th>代码</th><th>名称</th><th class="num">连板</th>
+              <th class="num">开盘价</th><th class="num">低开</th>
+              <th>我买了吗</th><th>记录</th>
             </tr></thead>
             <tbody id="tb-ovn-open"></tbody>
           </table>
@@ -494,7 +498,7 @@
             <thead><tr>
               <th>买入日</th><th>代码</th><th>名称</th><th class="num">连板</th>
               <th class="num">买入价</th><th class="num">卖出价</th>
-              <th class="num">收益</th><th>说明</th>
+              <th class="num">影子收益</th><th>执行</th>
             </tr></thead>
             <tbody id="tb-ovn-recent"></tbody>
           </table>

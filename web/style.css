@@ -577,6 +577,19 @@ tr.empty td{text-align:center;color:var(--txt-3);padding:26px 0!important;cursor
 .hintline .lnk{color:var(--accent-2);text-decoration:none;
   border-bottom:1px dashed color-mix(in srgb,var(--accent-2) 55%,transparent)}
 .hintline .lnk:hover{color:var(--accent-soft);border-bottom-style:solid}
+
+/* 「我买了吗」两个小按钮 —— 三态里的中间态（还没标）就是两个都没亮。
+   刻意不做成 checkbox：买/没买不是二选一的是非题，"还没说"也是合法状态，
+   而且点已选中的那个要能取消（回过头发现标错了）。 */
+.exg{display:inline-flex;gap:4px}
+.ex-b{
+  padding:2px 8px;font-size:11.5px;line-height:1.6;cursor:pointer;
+  border:1px solid var(--line-2);border-radius:6px;background:transparent;
+  color:var(--txt-3);font-family:inherit;transition:all .12s;
+}
+.ex-b:hover{color:var(--txt);border-color:var(--txt-3)}
+.ex-b[data-exec="true"].on{background:rgba(255,95,109,.12);border-color:rgba(255,95,109,.5);color:var(--up)}
+.ex-b[data-exec="false"].on{background:var(--panel-2);border-color:var(--txt-3);color:var(--txt-2)}
 /* 成绩单为空时的说明块：两行、左对齐。
    只给一句「明天起就会有」时，已经记了几天的人会以为功能坏了 ——
    这里要放确切数字，所以字号比普通空状态小一点，别喧宾夺主。 */

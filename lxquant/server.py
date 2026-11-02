@@ -651,6 +651,20 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 return self._json({"ok": True, **cfg})
+            if p == "/api/overnight/mark":
+                # 标记「我买了 / 我没买 / 还没说」。
+                # 软件无法知道你下没下单（券商不会告诉我们），只能让用户点一下；
+                # 猜的话账本立刻变脏，而干净样本是这套东西唯一的价值。
+                from . import overnight
+                # 注意用 do_POST 开头已经读好的 b，不要再调 self._body() ——
+                # rfile 里已经没有第二个 body，第二次 read(n) 会一直等，请求直接挂住。
+                n = overnight.mark_exec(
+                    str(b.get("code") or ""),
+                    str(b.get("buy_date") or ""),
+                    b.get("exec"),             # true / false / null
+                )
+                return self._json({"ok": True, "changed": n, **overnight.view()})
+
             if p == "/api/overnight/scan":
                 # 手动补跑：软件没开过、错过了 15:05，可以在这里补一份明日名单。
                 # 它会先结算今天该平的仓，再扫今天的首阴，所以重复点也不会重复记账。

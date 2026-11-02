@@ -129,7 +129,7 @@ def test_open_records_open_price_once():
         snap = _snap([_row("600000", "浦发银行", 10.8, 10.2, 10.5)])
         assert overnight.do_open(NEXT, snap) == 1
         st = overnight._load()
-        assert st["open"][0]["open"] == 10.2
+        assert st["signals"][0]["open"] == 10.2
         assert st["pending"] == []
         # 再调一次不能重复记
         assert overnight.do_open(NEXT, snap) == 0
@@ -138,8 +138,8 @@ def test_open_records_open_price_once():
 def test_settle_computes_return():
     with Env(HIST):
         st = overnight._load()
-        st["open"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
-                       "buy_date": NEXT, "streak": 3, "open": 10.0, "deferred": 0, "flag": ""}]
+        st["signals"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
+                        "buy_date": NEXT, "streak": 3, "open": 10.0, "deferred": 0, "flag": ""}]
         overnight._save(st)
         snap = _snap([_row("600000", "浦发银行", 10.5, 10.0, 10.0)])
         assert overnight.do_settle(NEXT, snap) == 1
@@ -153,15 +153,15 @@ def test_stuck_limit_down_is_deferred_not_closed():
     """收盘仍一字跌停 → 卖不掉，顺延，不能假装当天平仓"""
     with Env(HIST):
         st = overnight._load()
-        st["open"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
-                       "buy_date": NEXT, "streak": 3, "open": 10.0, "deferred": 0, "flag": ""}]
+        st["signals"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
+                        "buy_date": NEXT, "streak": 3, "open": 10.0, "deferred": 0, "flag": ""}]
         overnight._save(st)
         # 一字跌停：开=收=最高=最低=9.0，昨收 10.0
         snap = _snap([_row("600000", "浦发银行", 9.0, 9.0, 10.0, high=9.0, low=9.0)])
         assert overnight.do_settle(NEXT, snap) == 0
         st = overnight._load()
-        assert len(st["open"]) == 1, "应该顺延，而不是被平掉"
-        assert st["open"][0]["deferred"] == 1
+        assert len(st["signals"]) == 1, "应该顺延，而不是被平掉"
+        assert st["signals"][0]["deferred"] == 1
         assert overnight._read_trades() == []
 
 
@@ -174,9 +174,9 @@ def test_missed_signal_is_recorded():
         overnight._save(st)
         overnight.do_scan(NEXT, _snap([_row("600001", "B", 10.0, 10.0, 10.0)]))
         t = overnight._read_trades()
-        assert len(t) == 1 and t[0]["status"] == "missed", t
+        assert len(t) == 1 and t[0]["status"] == "gap", t
         s = overnight.stats()
-        assert s["missed"] == 1 and s["n"] == 0
+        assert s["gaps"] == 1 and s["signal"]["n"] == 0
 
 
 def test_tick_is_idempotent_in_one_day():
@@ -226,7 +226,7 @@ def test_trade_record_keeps_signal_evidence():
 
         # 次日开盘 19.0（低开 5%），当天收盘 19.6
         overnight.do_open(NEXT, _snap([_row("002708", "光洋股份", 19.0, 19.0, 20.0)]))
-        held = overnight._load()["open"][0]
+        held = overnight._load()["signals"][0]
         assert held["board"] == "汽车零部" and held["zbc"] == 17, held
 
         overnight.do_settle(NEXT, _snap([_row("002708", "光洋股份", 19.6, 19.0, 20.0)]))
@@ -246,7 +246,7 @@ def test_export_csv_headers_and_rows():
             "board": "汽车零部", "n_board": 0, "zbc": 17,
             "signal_close": 20.0, "open": 19.0, "gap": -5.0,
             "close": 19.6, "ret": 3.16, "hold_days": 0,
-            "status": "done", "deferred": 0, "flag": "",
+            "status": "settled", "deferred": 0, "flag": "",
         })
         csv = overnight.export_csv()
         lines = [x for x in csv.strip().split("\n") if x]
@@ -258,7 +258,7 @@ def test_export_csv_headers_and_rows():
 def test_export_csv_quotes_commas():
     with Env(HIST):
         overnight._append_trade({"code": "000001", "name": 'A,B"公司',
-                                 "status": "missed", "flag": "x,y"})
+                                 "status": "gap", "flag": "x,y"})
         csv = overnight.export_csv()
         row = csv.strip().split("\n")[1]
         assert '"A,B""公司"' in row, row
@@ -276,7 +276,7 @@ def test_pending_ctx_offsets():
     with Env(HIST):
         st = overnight._load()
         st["pending"] = [{"code": "600000", "signal_date": "2026-10-30"}]
-        st["open"] = []
+        st["signals"] = []
         overnight._save(st)
 
         # 周五晚上生成 → 买入日是下周一
@@ -292,15 +292,15 @@ def test_pending_ctx_offsets():
         assert c3["offset"] == -1, c3
 
 
-def test_pending_ctx_bought_today():
-    """已经买进去了，就不能再写"明天没有符合条件的票" """
+def test_pending_ctx_signaled_today():
+    """今天已经出过信号，就不能再写"明天没有符合条件的票"——但也不该说成"已买入" """
     today = __import__("time").strftime("%Y-%m-%d")
     with Env(HIST):
         st = overnight._load()
         st["pending"] = []
-        st["open"] = [{"code": "600000", "buy_date": today}]
+        st["signals"] = [{"code": "600000", "buy_date": today}]
         overnight._save(st)
-        assert overnight._pending_ctx(st)["phase"] == "bought"
+        assert overnight._pending_ctx(st)["phase"] == "signaled"
 
 
 def test_pending_ctx_no_scan_vs_having_none():
@@ -308,7 +308,7 @@ def test_pending_ctx_no_scan_vs_having_none():
     with Env(HIST):
         st = overnight._load()
         st["pending"] = []
-        st["open"] = []
+        st["signals"] = []
         st["marks"] = {}
         overnight._save(st)
         assert overnight._pending_ctx(st)["phase"] == "no_scan"
@@ -316,3 +316,98 @@ def test_pending_ctx_no_scan_vs_having_none():
         st["marks"] = {"scan": __import__("time").strftime("%Y-%m-%d")}
         overnight._save(st)
         assert overnight._pending_ctx(st)["phase"] == "fresh"
+
+
+# ---------------------------------------------------------------- 信号 ≠ 成交
+def test_open_does_not_assume_you_bought():
+    """do_open 只记信号，不能默认"软件在跑 = 你买了"。
+
+    这一条是这套东西的底线：账本一旦混进没下过单的"成交"，
+    后面所有胜率、盈亏比都不可信，而干净样本是它唯一的价值。
+    """
+    with Env(HIST):
+        st = overnight._load()
+        st["pending"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
+                          "streak": 3, "signal_close": 10.0}]
+        overnight._save(st)
+        overnight.do_open(NEXT, _snap([_row("600000", "浦发银行", 10.2, 10.0, 10.5)]))
+        sig = overnight._load()["signals"][0]
+        assert sig["exec"] is None, f"默认必须是「还没说」，实际 {sig['exec']!r}"
+
+
+def test_mark_exec_three_states():
+    """买了 / 没买 / 取消标记 —— 三态都要能落库。"""
+    with Env(HIST):
+        st = overnight._load()
+        st["signals"] = [{"code": "600000", "buy_date": TODAY, "open": 10.0}]
+        overnight._save(st)
+
+        assert overnight.mark_exec("600000", TODAY, True) == 1
+        assert overnight._load()["signals"][0]["exec"] is True
+        assert overnight._load()["signals"][0]["exec_at"], "标记时刻要记下来"
+
+        overnight.mark_exec("600000", TODAY, False)
+        assert overnight._load()["signals"][0]["exec"] is False
+
+        overnight.mark_exec("600000", TODAY, None)
+        assert overnight._load()["signals"][0]["exec"] is None, "要能撤销"
+
+
+def test_mark_exec_can_fix_after_settlement():
+    """第二天才想起来标「那天其实没买」—— 已落库的也要能改。"""
+    with Env(HIST):
+        overnight._append_trade({"signal_date": TODAY, "buy_date": NEXT, "code": "600000",
+                                 "open": 10.0, "close": 10.5, "ret": 5.0,
+                                 "status": "settled", "exec": None})
+        assert overnight.mark_exec("600000", NEXT, False) == 1
+        assert overnight._read_trades()[0]["exec"] is False
+
+
+def test_stats_splits_signal_and_real():
+    """没买的信号照样进「全部信号」，但不能进「实际买入」。
+
+    用户原话：「我没买但是你要记录进去」——
+    记录进来是为了统计规则，不是为了假装成交。两件事必须分开。
+    """
+    with Env(HIST):
+        base = {"signal_date": TODAY, "buy_date": NEXT, "sell_date": NEXT,
+                "status": "settled", "open": 10.0}
+        overnight._append_trade({**base, "code": "A1", "ret": 3.0, "exec": True})
+        overnight._append_trade({**base, "code": "A2", "ret": -2.0, "exec": True})
+        overnight._append_trade({**base, "code": "B1", "ret": 9.0, "exec": False})
+        overnight._append_trade({**base, "code": "B2", "ret": 1.0, "exec": None})
+
+        s = overnight.stats()
+        assert s["signal"]["n"] == 4, "全部信号应含没买和未标的"
+        assert s["real"]["n"] == 2, "实际买入只算 exec=True"
+        assert s["skipped"] == 1 and s["unconfirmed"] == 1
+        assert abs(s["real"]["avg"] - 0.5) < 1e-6, s["real"]
+        assert abs(s["signal"]["avg"] - 2.75) < 1e-6, s["signal"]
+        # 执行率只对"表过态的"算：2 买 / (2 买 + 1 没买) = 66.7%，未标的不进分母
+        assert abs(s["exec_rate"] - 66.7) < 0.1, s["exec_rate"]
+
+
+def test_load_migrates_legacy_open_key():
+    """老版本把信号存在 open 键里、且默认当成"买了"。
+    升级后要迁到 signals，并把 exec 补成 None（当时没人确认过）。"""
+    with Env(HIST):
+        import json as _json
+        overnight.STATE.write_text(_json.dumps({
+            "pending": [], "open": [{"code": "600000", "buy_date": TODAY, "open": 10.0}],
+            "marks": {}, "limitup": {},
+        }), encoding="utf-8")
+        st = overnight._load()
+        assert "open" not in st, "老键要清掉，否则两处并存会不一致"
+        assert st["signals"][0]["code"] == "600000"
+        assert st["signals"][0]["exec"] is None
+
+
+def test_open_computes_gap_on_the_spot():
+    """低开幅度在抓到开盘价时就要算出来 —— 它是核心自变量，不该等结算。"""
+    with Env(HIST):
+        st = overnight._load()
+        st["pending"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
+                          "streak": 3, "signal_close": 10.0}]
+        overnight._save(st)
+        overnight.do_open(NEXT, _snap([_row("600000", "浦发银行", 9.5, 9.5, 10.0)]))
+        assert abs(overnight._load()["signals"][0]["gap"] - (-5.0)) < 0.01

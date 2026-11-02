@@ -54,7 +54,7 @@ _REBUILT = [None]       # 本进程内已重建到哪一天（避免同一天反
 
 # ---------------------------------------------------------------- 状态读写
 def _blank():
-    return {"limitup": {}, "pending": [], "open": [], "marks": {}}
+    return {"limitup": {}, "pending": [], "signals": [], "marks": {}}
 
 
 def _load() -> dict:
@@ -64,8 +64,21 @@ def _load() -> dict:
             return _blank()
     except Exception:
         return _blank()
+    # 老版本把这个键叫 open（当时当成"持仓"，默认买了）。语义改成"信号"后更名，
+    # 顺手把老记录的 exec 补成 None —— 当时的"持仓"其实没人确认过是否真的买了。
+    if "open" in s:
+        legacy = s.pop("open") or []
+        for it in legacy:
+            it.setdefault("exec", None)
+        s.setdefault("signals", [])
+        s["signals"] = list(legacy) + list(s.get("signals") or [])
     for k, v in _blank().items():
         s.setdefault(k, v)
+    # 自愈：老记录可能没算 gap（早期版本的 do_open 不算）。
+    # 只要开盘价和信号日收盘都在，就补出来 —— 手工修数据迟早会漏。
+    for it in s.get("signals") or []:
+        if it.get("gap") is None and it.get("open") and it.get("signal_close"):
+            it["gap"] = round((it["open"] / it["signal_close"] - 1) * 100, 2)
     return s
 
 
@@ -195,9 +208,13 @@ def _recent_trade_days(today: str, n: int) -> list:
 
 # ---------------------------------------------------------------- 三步状态机
 def do_open(today: str, snap=None) -> int:
-    """次日开盘：把昨日 pending 变成持仓（买入价 = 集合竞价开盘价）。
+    """次日开盘：把昨日 pending 记成**今日信号**，抓下开盘价。
 
-    返回本次记录/跳过的笔数。当日只做一次（marks.open 挡住）。
+    ⚠️ 这里记的是"信号"，不是"成交"。`exec` 三态：None=还没说 / True=买了 / False=没买。
+    此前的版本默认"软件在跑 = 你买了"，会把没下单的单子算进胜率 —— 账本就脏了，
+    而干净样本正是这套东西唯一的价值。买没买让用户在界面上点一下，默认留空。
+
+    返回本次记录到的信号数。当日只做一次（marks.open 挡住）。
     """
     st = _load()
     if not st["pending"] or st["marks"].get("open") == today:
@@ -223,11 +240,15 @@ def do_open(today: str, snap=None) -> int:
         # 信号日的证据必须整份带进来：板块、同板块涨停数、炸板次数、封板时间。
         # 只留买卖价的话，事后没法回答"弱板是不是更差""板块有承接是不是更好" ——
         # 而这两个问题正是这套策略接下来要验证的东西。
-        st["open"].append({
+        st["signals"].append({
             "code": str(it["code"]), "name": it.get("name", ""),
             "signal_date": it["signal_date"], "buy_date": today,
             "streak": it.get("streak"), "signal_close": it.get("signal_close"),
             "open": round(o, 3), "deferred": 0,
+            # 低开幅度当场就算出来：它是这套策略最核心的自变量，
+            # 而且信号日收盘价就在手边，没理由等到收盘结算才补。
+            "gap": (round((o / it["signal_close"] - 1) * 100, 2)
+                    if it.get("signal_close") else None),
             "board": it.get("board") or "", "n_board": it.get("n_board"),
             "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
             "lbc_em": it.get("lbc_em"),
@@ -235,6 +256,9 @@ def do_open(today: str, snap=None) -> int:
             # 但它证明不了"你那天真的在盘中做了决定"，统计执行率时要分开算。
             "captured_at": time.strftime("%H:%M"),
             "on_time": time.strftime("%H:%M") <= ON_TIME_BY,
+            # 你实际有没有下手：None=还没说（默认）/ True=买了 / False=没买。
+            # 不管哪种，这条信号的价格和影子收益都会留下来 —— 样本不能因为没下单就消失。
+            "exec": None, "exec_at": "",
             "flag": "一字跌停开盘" if one_word else "",
         })
         got += 1
@@ -250,7 +274,7 @@ def do_settle(day: str, snap=None) -> int:
     `day` 不一定是"今天"：周末打开软件时是上周五，开盘前是上一个交易日。
     """
     st = _load()
-    if not st["open"]:
+    if not st["signals"]:
         st["marks"]["settle"] = day
         _save(st)
         return 0
@@ -260,7 +284,7 @@ def do_settle(day: str, snap=None) -> int:
     idx = {str(r["code"]): r for _, r in snap.iterrows()}
 
     keep, closed = [], 0
-    for it in st["open"]:
+    for it in st["signals"]:
         r = idx.get(it["code"])
         if r is None:
             keep.append(it)
@@ -282,6 +306,7 @@ def do_settle(day: str, snap=None) -> int:
             it["flag"] = (it.get("flag") or "") + " 连续跌停未卖出"
         ret = (px / it["open"] - 1) * 100 if it["open"] else 0.0
         sc = it.get("signal_close") or 0
+        ex = it.get("exec")            # None=未确认 / True=买了 / False=没买
         _append_trade({
             "signal_date": it["signal_date"], "buy_date": it["buy_date"],
             "sell_date": day, "code": it["code"], "name": it.get("name", ""),
@@ -291,14 +316,17 @@ def do_settle(day: str, snap=None) -> int:
             "signal_close": sc, "open": it["open"], "close": round(px, 3),
             "gap": round((it["open"] / sc - 1) * 100, 2) if sc else None,
             "hold_days": _days_between(it["buy_date"], day),
-            "ret": round(ret, 2), "status": "done",
+            # ret 是**影子收益**：按规则"开盘买、收盘卖"会拿到多少，与是否真下手无关。
+            # 这样没买的信号也进得了统计 —— 否则样本全被"我那天没空"削掉。
+            "ret": round(ret, 2), "status": "settled", "exec": ex,
+            "exec_at": it.get("exec_at") or "",
             "board": it.get("board") or "", "n_board": it.get("n_board"),
             "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
             "captured_at": it.get("captured_at") or "", "on_time": it.get("on_time"),
             "deferred": it.get("deferred") or 0, "flag": it.get("flag") or "",
         })
         closed += 1
-    st["open"] = keep
+    st["signals"] = keep
     st["marks"]["settle"] = day
     _save(st)
     return closed
@@ -370,9 +398,9 @@ def do_scan(day: str, snap=None) -> list:
         for d in sorted(st["emotion"])[:-10]:
             st["emotion"].pop(d, None)
 
-    # 昨天给的单子如果今天没执行（软件没开 / 没下单），如实记一笔"错过"。
-    # 注意：同一天重复生成名单（手动补跑、或调度重入）不能算错过 ——
-    # signal_date 等于本次 ref 的，说明是同一批，直接替换即可。
+    # 昨天那份名单如果连开盘价都没抓到（软件整天没开），记一笔"缺口"。
+    # 注意这不是"你没买"——买没买是 exec 字段，跟软件开没开是两件事。
+    # 同一天重复生成名单（手动补跑、调度重入）不能算缺口：signal_date >= day 的直接跳过。
     for it in st["pending"]:
         if str(it.get("signal_date") or "") >= day:
             continue
@@ -381,10 +409,12 @@ def do_scan(day: str, snap=None) -> list:
             "code": it["code"], "name": it.get("name", ""),
             "streak": it.get("streak"), "signal_close": it.get("signal_close"),
             "open": None, "close": None, "gap": None, "hold_days": None,
-            "ret": None, "status": "missed", "deferred": 0,
+            "ret": None, "status": "gap", "exec": it.get("exec"),
+            "exec_at": it.get("exec_at") or "", "deferred": 0,
             "board": it.get("board") or "", "n_board": it.get("n_board"),
             "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
-            "flag": "开盘时没记录成交（软件未运行或没下单）",
+            # 这条只说明开盘价没抓到（软件没开），不代表你没买 —— 样本缺口，不是执行记录
+            "flag": "开盘价没抓到（当天软件没运行）",
         })
     st["pending"] = sorted(fresh, key=lambda x: -int(x.get("streak") or 0))
     st["marks"]["scan"] = day
@@ -489,10 +519,19 @@ CSV_FIELDS = [
     ("code", "代码"), ("name", "名称"), ("streak", "连板"),
     ("board", "板块"), ("n_board", "同板块当日涨停数"), ("zbc", "炸板次数"),
     ("fbt", "首封时间"), ("signal_close", "信号日收盘"), ("open", "买入价(开盘)"),
-    ("gap", "低开幅度%"), ("close", "卖出价"), ("ret", "收益%"),
-    ("hold_days", "持天数"), ("captured_at", "记录时刻"), ("on_time", "是否准时"),
+    ("gap", "低开幅度%"), ("close", "卖出价"), ("ret", "影子收益%"),
+    ("hold_days", "持天数"), ("exec", "我买了吗"), ("exec_at", "标记时刻"),
+    ("captured_at", "记录时刻"), ("on_time", "是否准时"),
     ("status", "状态"), ("deferred", "顺延天数"), ("flag", "备注"),
 ]
+
+# 导出时把内部值换成中文：这文件是给人用 Excel 看的，
+# True/False/None 到了表格里既难读也难筛选。
+_VALUE_CN = {
+    "exec": {True: "买了", False: "没买", None: "未标"},
+    "status": {"settled": "已结算", "gap": "开盘价没抓到"},
+    "on_time": {True: "准时", False: "补记", None: ""},
+}
 
 
 def export_csv() -> str:
@@ -508,7 +547,9 @@ def export_csv() -> str:
         row = []
         for k, _ in CSV_FIELDS:
             v = t.get(k)
-            if v is None:
+            if k in _VALUE_CN:
+                v = _VALUE_CN[k].get(v, v)
+            if v is None or v == "":
                 row.append("")
             elif isinstance(v, str) and ("," in v or '"' in v):
                 row.append('"' + v.replace('"', '""') + '"')
@@ -519,36 +560,109 @@ def export_csv() -> str:
 
 
 # ---------------------------------------------------------------- 视图 / 统计
+def _agg(rows: list) -> dict:
+    """一组已结算信号的统计。空组返回 None 字段，界面显示「—」。"""
+    r = sorted(float(t.get("ret") or 0) for t in rows)
+    if not r:
+        return {"n": 0, "avg": None, "med": None, "win_rate": None,
+                "payoff": None, "best": None, "worst": None}
+    win = [x for x in r if x > 0]
+    loss = [x for x in r if x < 0]
+    return {
+        "n": len(r),
+        "avg": round(sum(r) / len(r), 2),
+        "med": round(r[len(r) // 2], 2),
+        "win_rate": round(len(win) / len(r) * 100, 1),
+        "payoff": (round(sum(win) / len(win) / abs(sum(loss) / len(loss)), 2)
+                   if win and loss and sum(loss) else None),
+        "best": round(r[-1], 2), "worst": round(r[0], 2),
+    }
+
+
 def stats() -> dict:
+    """两套口径，**别混着讲**：
+
+    - `signal`：全部信号（含没买的、还没标买没买的）。影子收益，衡量**规则本身**。
+      没买也留下 —— 否则样本会被"那几天没空"悄悄削掉，看起来比实际好。
+    - `real`：只有你标记了"买了"的。衡量**你实际执行的结果**。
+    - `skipped` / `unconfirmed`：没买 / 还没标的笔数，用来算执行率。
+    - `gaps`：开盘价没抓到（软件整天没开）的笔数 —— 样本缺口，不是执行记录。
+    """
     ts = _read_trades()
-    done = [t for t in ts if t.get("status") == "done"]
-    missed = [t for t in ts if t.get("status") == "missed"]
-    out = {"n": len(done), "missed": len(missed), "win_rate": None,
-           "avg": None, "med": None, "payoff": None, "total": len(ts)}
-    if done:
-        r = sorted(float(t.get("ret") or 0) for t in done)
-        win = [x for x in r if x > 0]
-        loss = [x for x in r if x < 0]
-        out.update({
-            "win_rate": round(len(win) / len(r) * 100, 1),
-            "avg": round(sum(r) / len(r), 2),
-            "med": round(r[len(r) // 2], 2),
-            "payoff": (round(sum(win) / len(win) / abs(sum(loss) / len(loss)), 2)
-                       if win and loss and sum(loss) else None),
-            "best": round(r[-1], 2), "worst": round(r[0], 2),
-        })
-    # 按月汇总，看是不是只靠某一段
+    settled = [t for t in ts if t.get("status") == "settled"]
+    gaps = [t for t in ts if t.get("status") == "gap"]
+    real = [t for t in settled if t.get("exec") is True]
+    skipped = [t for t in settled if t.get("exec") is False]
+    unsure = [t for t in settled if t.get("exec") is None]
+
+    out = _agg(settled)
+    out.update({
+        "signal": _agg(settled),
+        "real": _agg(real),
+        "skipped": len(skipped),
+        "unconfirmed": len(unsure),
+        "gaps": len(gaps),
+        "total": len(ts),
+        # 执行率只看"已经表过态的"（买了 + 没买），未确认的不进分母 ——
+        # 否则刚生成那一天就会被算成 0%，毫无意义。
+        "exec_rate": (round(len(real) / (len(real) + len(skipped)) * 100, 1)
+                      if (real or skipped) else None),
+    })
+
     by = {}
-    for t in done:
+    for t in settled:
         m = str(t.get("buy_date") or "")[:7]
         if m:
             by.setdefault(m, []).append(float(t.get("ret") or 0))
     out["by_month"] = [{"month": m, "n": len(v),
                         "avg": round(sum(v) / len(v), 2)}
                        for m, v in sorted(by.items())]
-    out["exec_rate"] = (round(len(done) / (len(done) + len(missed)) * 100, 1)
-                        if (done or missed) else None)
     return out
+
+
+def mark_exec(code: str, buy_date: str, exec_: bool | None) -> int:
+    """标记某个信号「我买了 / 我没买 / 还没说」。返回改动的条数。
+
+    为什么让用户点：软件不可能知道你下没下单，期货商接口、券商柜台的成交回报都拿不到。
+    猜（"软件开着你肯定买了"）会把账本搞脏，而账本干净是这套东西唯一的价值。
+
+    `buy_date` 为空时，改的是"当前所有还没结算的信号"——省得一天一只只点。
+    """
+    n = 0
+    now_hm = time.strftime("%H:%M")
+
+    st = _load()
+    for it in st.get("signals") or []:
+        if code and str(it.get("code")) != str(code):
+            continue
+        if buy_date and str(it.get("buy_date")) != str(buy_date):
+            continue
+        it["exec"] = exec_
+        it["exec_at"] = now_hm
+        n += 1
+    if n:
+        _save(st)
+
+    # 已经结算落库的也要能改（第二天才想起来标「那天其实没买」）
+    if n == 0:
+        ts = _read_trades()
+        hit = False
+        for t in ts:
+            if t.get("status") not in ("settled", "gap"):
+                continue
+            if code and str(t.get("code")) != str(code):
+                continue
+            if buy_date and str(t.get("buy_date")) != str(buy_date):
+                continue
+            t["exec"] = exec_
+            t["exec_at"] = now_hm
+            hit = True
+            n += 1
+        if hit:
+            with open(TRADES, "w", encoding="utf-8") as f:
+                for t in ts:
+                    f.write(json.dumps(t, ensure_ascii=False) + "\n")
+    return n
 
 
 def _pending_ctx(st: dict, now: datetime | None = None) -> dict:
@@ -572,9 +686,10 @@ def _pending_ctx(st: dict, now: datetime | None = None) -> dict:
         return {"phase": "waiting", "buy_date": buy, "offset": off,
                 "signal_date": sig, "scan": marks.get("scan") or ""}
 
-    # 没有待买：要分清"已经买进去了""扫过了确实没票""根本没扫过"——三种文案完全不同
-    if any(str(o.get("buy_date") or "") == today for o in (st.get("open") or [])):
-        return {"phase": "bought", "buy_date": today, "offset": 0,
+    # 没有待买：要分清"今天已经出过信号""扫过了确实没票""根本没扫过"——三种文案完全不同。
+    # 注意叫 signaled 不叫 bought：今天有信号 ≠ 你买了，买没买是每行 exec 的事。
+    if any(str(o.get("buy_date") or "") == today for o in (st.get("signals") or [])):
+        return {"phase": "signaled", "buy_date": today, "offset": 0,
                 "signal_date": "", "scan": marks.get("scan") or ""}
     scan = str(marks.get("scan") or "")
     return {"phase": "fresh" if scan and scan >= ref else "no_scan",
@@ -588,7 +703,7 @@ def view() -> dict:
     emo = st.get("emotion") or {}
     last_emo = {"date": max(emo), **emo[max(emo)]} if emo else None
     return {
-        "pending": st["pending"], "open": st["open"],
+        "pending": st["pending"], "signals": st["signals"],
         "emotion": last_emo, "pending_ctx": _pending_ctx(st),
         "marks": st["marks"], "stats": stats(),
         "recent": _read_trades()[-40:][::-1],
