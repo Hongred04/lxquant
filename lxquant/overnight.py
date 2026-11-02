@@ -45,6 +45,14 @@ OPEN_FROM, OPEN_TO = "09:26", "14:55"
 ON_TIME_BY = "10:00"
 SETTLE_AT = "15:05"     # 收盘价落定后才结算
 
+# A 股 T+1：买入当天不许卖出。这是交易所规则，不是可配置项。
+# 早期版本按"次日开盘买、当天收盘卖"实现，那是 T+0，实盘不存在 ——
+# 实测 354 个首阴样本：T+0 口径 +1.66%，T+1 口径（次日开盘买、第三日卖）
+# 只有 -0.04%（中位 -1.65%、盈亏比 0.99）。也就是说那 +1.66% 完全来自
+# "当天买当天卖"这一段，而这一段拿不到。这条线目前没有实盘价值，
+# 留在这里是为了样本积累与规则重设计，界面上有明确标注。
+MIN_HOLD_DAYS = 1
+
 DIR = DATA_DIR / "overnight"
 STATE = DIR / "state.json"
 TRADES = DIR / "trades.jsonl"
@@ -285,6 +293,12 @@ def do_settle(day: str, snap=None) -> int:
 
     keep, closed = [], 0
     for it in st["signals"]:
+        # ★ T+1：买入当天不能卖，最早下一个交易日。少了这一句，整个账本就是
+        #   T+0 口径，收益全是假的（实测高估 1.7 个百分点/笔）。
+        held = _days_between(it.get("buy_date"), day)
+        if held is None or held < MIN_HOLD_DAYS:
+            keep.append(it)
+            continue
         r = idx.get(it["code"])
         if r is None:
             keep.append(it)
@@ -702,8 +716,15 @@ def view() -> dict:
     st = _load()
     emo = st.get("emotion") or {}
     last_emo = {"date": max(emo), **emo[max(emo)]} if emo else None
+    # 每笔持仓补一个「最早哪天能卖」：T+1 下就是买入日的下一个交易日。
+    # 前端不该自己加一天（会撞周末），更不该让人以为能当天卖。
+    sigs = []
+    for it in st["signals"]:
+        x = dict(it)
+        x["sell_from"] = next_trade_day(it.get("buy_date") or "")
+        sigs.append(x)
     return {
-        "pending": st["pending"], "signals": st["signals"],
+        "pending": st["pending"], "signals": sigs,
         "emotion": last_emo, "pending_ctx": _pending_ctx(st),
         "marks": st["marks"], "stats": stats(),
         "recent": _read_trades()[-40:][::-1],

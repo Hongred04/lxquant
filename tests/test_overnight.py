@@ -14,8 +14,9 @@ import pandas as pd
 
 from lxquant import limitup, overnight
 
-TODAY = "2026-11-02"
-NEXT = "2026-11-03"
+TODAY = "2026-11-02"      # 信号日
+NEXT = "2026-11-03"       # 买入日（D1）
+DAY3 = "2026-11-04"       # 最早可卖日（D2，T+1）
 
 
 # ---------------------------------------------------------------- 涨停口径
@@ -141,12 +142,14 @@ def test_settle_computes_return():
         st["signals"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
                         "buy_date": NEXT, "streak": 3, "open": 10.0, "deferred": 0, "flag": ""}]
         overnight._save(st)
+        # T+1：买入日 NEXT 当天不能卖，要到 DAY3
         snap = _snap([_row("600000", "浦发银行", 10.5, 10.0, 10.0)])
-        assert overnight.do_settle(NEXT, snap) == 1
+        assert overnight.do_settle(NEXT, snap) == 0, "买入当天就平了，违反 T+1"
+        assert overnight.do_settle(DAY3, snap) == 1
         t = overnight._read_trades()
         assert len(t) == 1
         assert abs(t[0]["ret"] - 5.0) < 0.01, t[0]
-        assert overnight.stats()["n"] == 1
+        assert overnight.stats()["signal"]["n"] == 1
 
 
 def test_stuck_limit_down_is_deferred_not_closed():
@@ -157,8 +160,9 @@ def test_stuck_limit_down_is_deferred_not_closed():
                         "buy_date": NEXT, "streak": 3, "open": 10.0, "deferred": 0, "flag": ""}]
         overnight._save(st)
         # 一字跌停：开=收=最高=最低=9.0，昨收 10.0
+        # 注意是在 DAY3（可卖日）才跌停 —— NEXT 当天本来就卖不了，不算顺延
         snap = _snap([_row("600000", "浦发银行", 9.0, 9.0, 10.0, high=9.0, low=9.0)])
-        assert overnight.do_settle(NEXT, snap) == 0
+        assert overnight.do_settle(DAY3, snap) == 0
         st = overnight._load()
         assert len(st["signals"]) == 1, "应该顺延，而不是被平掉"
         assert st["signals"][0]["deferred"] == 1
@@ -229,12 +233,12 @@ def test_trade_record_keeps_signal_evidence():
         held = overnight._load()["signals"][0]
         assert held["board"] == "汽车零部" and held["zbc"] == 17, held
 
-        overnight.do_settle(NEXT, _snap([_row("002708", "光洋股份", 19.6, 19.0, 20.0)]))
+        overnight.do_settle(DAY3, _snap([_row("002708", "光洋股份", 19.6, 19.0, 20.0)]))
         t = overnight._read_trades()[0]
         assert t["signal_close"] == 20.0
         assert abs(t["gap"] - (-5.0)) < 0.01, t["gap"]          # 低开幅度 = 19/20-1
         assert t["board"] == "汽车零部" and t["zbc"] == 17
-        assert t["hold_days"] == 0                              # 同日买同日卖
+        assert t["hold_days"] >= 1                              # T+1：至少隔一天
         assert abs(t["ret"] - 3.16) < 0.05, t["ret"]            # 19.6/19-1
 
 
@@ -411,3 +415,40 @@ def test_open_computes_gap_on_the_spot():
         overnight._save(st)
         overnight.do_open(NEXT, _snap([_row("600000", "浦发银行", 9.5, 9.5, 10.0)]))
         assert abs(overnight._load()["signals"][0]["gap"] - (-5.0)) < 0.01
+
+
+# ---------------------------------------------------------------- T+1 硬约束
+def test_settle_never_sells_on_buy_day():
+    """A 股 T+1：买入当天不许卖。
+
+    这是交易所规则。早期实现按"当天买、当天卖"结算，等于 T+0，
+    把 354 个样本从 -0.04% 高估到 +1.66% —— 整个策略的结论都是假的。
+    """
+    with Env(HIST):
+        st = overnight._load()
+        st["signals"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
+                          "buy_date": NEXT, "streak": 3, "open": 10.0,
+                          "deferred": 0, "exec": True}]
+        overnight._save(st)
+
+        # 买入当天结算：必须原样留着，一笔都不许平
+        assert overnight.do_settle(NEXT, _snap([_row("600000", "浦发银行", 11.0, 10.0, 12.0)])) == 0
+        assert len(overnight._load()["signals"]) == 1, "买入当天就被平掉了，违反 T+1"
+        assert overnight._read_trades() == []
+
+        # 下一个交易日才可以卖
+        assert overnight.do_settle(DAY3, _snap([_row("600000", "浦发银行", 11.5, 10.0, 12.0)])) == 1
+        t = overnight._read_trades()[0]
+        assert t["sell_date"] == DAY3
+        assert t["hold_days"] >= 1
+
+
+def test_hold_days_is_recorded_not_zero():
+    """持有的天数要如实记下来；如果一直是 0，说明又被写成 T+0 了。"""
+    with Env(HIST):
+        st = overnight._load()
+        st["signals"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
+                          "buy_date": NEXT, "open": 10.0, "deferred": 0}]
+        overnight._save(st)
+        overnight.do_settle(DAY3, _snap([_row("600000", "浦发银行", 11.0, 10.0, 12.0)]))
+        assert overnight._read_trades()[0]["hold_days"] >= 1

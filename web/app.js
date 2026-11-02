@@ -3453,7 +3453,14 @@ async function saveSettings() {
 /* ================================================================ 隔夜低吸（首阴套利）
    和「选股」页那套完全独立的一条线：
      那边 14:45 决策、按收盘价买、持有几天跌破均价线才走；
-     这边收盘后出名单、次日开盘买、当天收盘必须卖，不留隔夜。
+     这边收盘后出名单、次日开盘买、**最早第三日卖**（A 股 T+1）。
+
+   ⚠️ 这条线目前不具备实盘价值，页面顶部有常驻警示。原因：
+   最初按「次日开盘买、当日收盘卖」算出 +1.66%/笔，但那违反 T+1（当天买不能当天卖）。
+   按真实规则重算 354 个首阴样本：均值 −0.04%、中位 −1.65%、盈亏比 0.99。
+   钱全在"当天买当天卖"那一段，而这段交易所不给。
+   保留它是为了继续记样本、验证新规则 —— 别当成可执行策略。
+
    账本在 data/overnight/，不并进 data/memory/ —— 持有期不同，混在一起算总账两边都失真。 */
 async function loadOvernight() {
   const busy = $('#ovn-loading');
@@ -3579,7 +3586,7 @@ function renderOvernight() {
       s: rl.n ? '只算你标记买了的' : '还没有标记过成交' },
     { k: '平均每笔（全部信号）', v: sg.avg == null ? '—' : pct(sg.avg),
       c: cls(sg.avg),
-      s: sg.n ? `胜率 ${fmt(sg.win_rate, 0)}% · 中位 ${pct(sg.med)}` : '样本还不够' },
+      s: sg.n ? `胜率 ${fmt(sg.win_rate, 0)}% · 中位 ${pct(sg.med)} · T+1` : '样本还不够' },
     { k: '盈亏比（全部信号）', v: sg.payoff == null ? '—' : fmt(sg.payoff, 2),
       s: sg.payoff == null ? (sg.n ? '还没出现亏损样本' : '样本不够') : '赚的比亏的多多少倍' },
   ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c || ''}">${x.v}</div><div class="s">${x.s || ''}</div></div>`).join('');
@@ -3633,13 +3640,14 @@ function renderOvernight() {
       </tr>`).join('')
     : `<tr class="empty"><td colspan="7">${esc(COPY.empty)}</td></tr>`;
 
-  // 记录状态：补记的要说清"几点抓的"，否则分不清是盘中真做了决定还是事后补的
+  // 记录状态：T+1 是硬约束，先把"最早哪天能卖"说清楚，
+  // 再提补记时刻（那是执行质量的细节，次要）。
   const capState = x => {
     if (x.deferred) return '跌停卖不掉，顺延 ' + x.deferred + ' 天';
-    const at = String(x.captured_at || '');
     if (x.flag) return x.flag;
-    if (at && x.on_time === false) return `补记于 ${at}`;
-    return at ? `开盘 ${at} 记录` : '已记录';
+    const sf = String(x.sell_from || '');
+    if (sf) return `T+1 · 最早 ${sf.slice(5)} 卖`;
+    return '已记录';
   };
 
   // ---- 今日信号：不管买没买都在这儿，买没买由你点
@@ -3671,7 +3679,7 @@ function renderOvernight() {
   show('#ovn-recent', recent.length > 0);
   if (recent.length) {
     const sub = $('#ovn-recent-sub');
-    if (sub) sub.textContent = `最近 ${recent.length} 笔 · 影子收益=按规则开盘买收盘卖 · 可导出 CSV 分组验证`;
+    if (sub) sub.textContent = `最近 ${recent.length} 笔 · 影子收益=开盘买、T+1 卖出（最早第三日收盘）· 可导出 CSV 分组验证`;
     $('#tb-ovn-recent').innerHTML = recent.map(x => {
       const gap = x.status === 'gap';
       const ex = x.exec;

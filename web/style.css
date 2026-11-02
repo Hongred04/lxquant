@@ -578,6 +578,19 @@ tr.empty td{text-align:center;color:var(--txt-3);padding:26px 0!important;cursor
   border-bottom:1px dashed color-mix(in srgb,var(--accent-2) 55%,transparent)}
 .hintline .lnk:hover{color:var(--accent-soft);border-bottom-style:solid}
 
+/* T+1 警示条：这条策略在真实规则下不成立，必须一眼看见，不能藏在正文里。
+   用左侧粗边 + 淡红底，比整块红底克制 —— 它是常驻信息，不是一次性报错。 */
+.t1warn{
+  display:flex;flex-direction:column;gap:5px;
+  margin:0 0 12px;padding:11px 14px;
+  border:1px solid rgba(255,95,109,.28);border-left:3px solid var(--up);
+  border-radius:var(--radius);background:rgba(255,95,109,.06);
+  font-size:12.5px;line-height:1.75;color:var(--txt-2);
+}
+.t1warn>b{color:var(--up);font-size:13px}
+.t1warn b{color:var(--txt)}
+.t1warn .muted{color:var(--txt-3);font-size:12px}
+
 /* 「我买了吗」两个小按钮 —— 三态里的中间态（还没标）就是两个都没亮。
    刻意不做成 checkbox：买/没买不是二选一的是非题，"还没说"也是合法状态，
    而且点已选中的那个要能取消（回过头发现标错了）。 */
