@@ -262,3 +262,57 @@ def test_export_csv_quotes_commas():
         csv = overnight.export_csv()
         row = csv.strip().split("\n")[1]
         assert '"A,B""公司"' in row, row
+
+
+def test_next_trade_day_skips_weekend():
+    """周五收盘生成的名单，下一个买入日是周一 —— 不是"明天"（周六）"""
+    assert overnight.next_trade_day("2026-10-30") == "2026-11-02"
+    assert overnight.next_trade_day("2026-10-29") == "2026-10-30"
+
+
+def test_pending_ctx_offsets():
+    """界面文案全靠 offset：0=今天买 / 1=之后买 / -1=已过期。错一个就会写出"明天"却指向今天。"""
+    from datetime import datetime as _dt
+    with Env(HIST):
+        st = overnight._load()
+        st["pending"] = [{"code": "600000", "signal_date": "2026-10-30"}]
+        st["open"] = []
+        overnight._save(st)
+
+        # 周五晚上生成 → 买入日是下周一
+        c1 = overnight._pending_ctx(st, _dt(2026, 10, 30, 16, 0))
+        assert (c1["phase"], c1["buy_date"], c1["offset"]) == ("waiting", "2026-11-02", 1)
+
+        # 周一早上 8 点 → 今天买
+        c2 = overnight._pending_ctx(st, _dt(2026, 11, 2, 8, 0))
+        assert (c2["buy_date"], c2["offset"]) == ("2026-11-02", 0)
+
+        # 周二才打开 → 已经过期
+        c3 = overnight._pending_ctx(st, _dt(2026, 11, 3, 10, 0))
+        assert c3["offset"] == -1, c3
+
+
+def test_pending_ctx_bought_today():
+    """已经买进去了，就不能再写"明天没有符合条件的票" """
+    today = __import__("time").strftime("%Y-%m-%d")
+    with Env(HIST):
+        st = overnight._load()
+        st["pending"] = []
+        st["open"] = [{"code": "600000", "buy_date": today}]
+        overnight._save(st)
+        assert overnight._pending_ctx(st)["phase"] == "bought"
+
+
+def test_pending_ctx_no_scan_vs_having_none():
+    """'还没扫过' 和 '扫过但没有票' 是两件事，文案不能混"""
+    with Env(HIST):
+        st = overnight._load()
+        st["pending"] = []
+        st["open"] = []
+        st["marks"] = {}
+        overnight._save(st)
+        assert overnight._pending_ctx(st)["phase"] == "no_scan"
+
+        st["marks"] = {"scan": __import__("time").strftime("%Y-%m-%d")}
+        overnight._save(st)
+        assert overnight._pending_ctx(st)["phase"] == "fresh"

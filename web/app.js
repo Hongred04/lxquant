@@ -3458,6 +3458,51 @@ async function rescanOvernight() {
   renderOvernight();
 }
 
+/** 隔夜低吸页的全部用户可见文案 —— 只按 pending_ctx 选一套。
+
+    为什么单独拎出来：这些句子原来散在 100 多行渲染代码里，写死了"明日待买"，
+    周一盘中打开就会说错话（那份名单其实是今天要买的，9:25 可能已经过了）。
+    现在只有这一个函数决定措辞，改文案不用碰渲染，也不会再出现"标题说今天、数字说待买"。
+
+    phase 的取值来自 overnight._pending_ctx()：
+      waiting(offset 0/1/-1)  有待买，买点是今天 / 之后 / 已过期
+      bought                  今天已经买进去了（待买为空）
+      fresh                   扫过了，确实没有符合条件的票
+      no_scan                 还没跑过扫描 —— 和"没有票"是两件事
+*/
+function overnightCopy(ctx, open) {
+  const off = ctx.offset, buyOn = ctx.buy_date || '';
+  const phase = ctx.phase || 'fresh';
+
+  if (phase === 'waiting') {
+    if (off === 0) {
+      return { kpi: '今天待买', sub: '今天 9:25 挂单', title: '今天待买',
+        note: '今天 9:25 集合竞价挂单，成交价就是开盘价', how: '今天 9:25 挂市价' };
+    }
+    if (off === -1) {
+      return { kpi: '待买·已过期', sub: (buyOn || '') + ' 的开盘已过', title: '待买（已过期）',
+        note: `这批该在 ${buyOn} 开盘买，已经过了；收盘后会自动记一笔「错过」`, how: '已过期',
+        empty: `这批信号（${ctx.signal_date || '—'} 收盘选出）的买点已经过去，不会再执行` };
+    }
+    return { kpi: '明日待买', sub: `次日 ${buyOn} 9:25 挂单`, title: '明日待买',
+      note: `${buyOn} 9:25 集合竞价挂单，成交价就是开盘价`, how: '次日 9:25 挂市价' };
+  }
+  if (phase === 'bought') {
+    const n = (open || []).length;
+    return { kpi: '今天已买入', sub: '收盘前平掉', title: '今天这批已买入',
+      note: '见下面「已买入 · 等收盘卖」，当天收盘前平掉',
+      empty: `今天已经买入 ${n} 只，不用再挂单；收盘前平掉即可` };
+  }
+  if (phase === 'no_scan') {
+    return { kpi: '待买', sub: '名单还没生成', title: '待买名单还没生成',
+      note: `上次生成：${ctx.scan || '从未'}　·　点左上角「重新生成明日名单」`,
+      empty: '还没跑过收盘扫描，所以没有名单 —— 不是"没有票"' };
+  }
+  return { kpi: '明日待买', sub: '没有符合条件的票', title: '明日待买',
+    note: '收盘后自动生成',
+    empty: '今天没有符合条件的票 —— 连板 ≥3 且收实体阴线的，全市场一只都没有' };
+}
+
 function renderOvernight() {
   const d = S.ovn;
   const st = (d && d.stats) || {};
@@ -3488,9 +3533,18 @@ function renderOvernight() {
   const pct = v => (v == null ? '—' : (v > 0 ? '+' : '') + fmt(v, 2) + '%');
   const cls = v => (v == null ? '' : (v > 0 ? 'up' : (v < 0 ? 'down' : '')));
 
+  // 文案表单独成函数（overnightCopy），这里只取结果 —— 改文案不用翻渲染逻辑
+  const ctx = d.pending_ctx || {};
+  const phase = ctx.phase || 'fresh';
+  const COPY = overnightCopy(ctx, open);
+
+  // 数量要跟标题对上：写"今天已买入"，数字就得是今天买进的那几只，
+  // 不是待买数（待买这时是 0，会显示成"今天已买入 0 只"，自相矛盾）。
+  const todayBought = open.filter(o => String(o.buy_date || '') === String(ctx.buy_date || '')).length;
+  const kv = phase === 'bought' ? todayBought : pend.length;
+
   $('#ovn-kpis').innerHTML = [
-    { k: '明日待买', v: pend.length ? pend.length + ' 只' : '0 只',
-      s: pend.length ? '次日 9:25 挂单' : '明天没有符合条件的票' },
+    { k: COPY.kpi, v: kv ? kv + ' 只' : '0 只', s: COPY.sub },
     { k: '买了还没卖', v: open.length ? open.length + ' 只' : '0 只',
       s: open.length ? '收盘前必须平掉' : '当前没有持仓' },
     { k: '累计已平仓', v: (st.n || 0) + ' 笔',
@@ -3530,8 +3584,14 @@ function renderOvernight() {
         : '');
   }
 
-  // ---- 明日待买（核心输出，永远显示）
+  // ---- 待买（核心输出，永远显示）
   show('#ovn-pending', true);
+  const ph = document.querySelector('#ovn-pending .ph');
+  if (ph) {
+    const b = ph.querySelector('b'), sp = ph.querySelector('.muted');
+    if (b) b.textContent = COPY.title;
+    if (sp) sp.textContent = COPY.note;
+  }
   $('#tb-ovn-pending').innerHTML = pend.length
     ? pend.map(x => `<tr>
         <td class="code">${esc(x.code)}</td>
@@ -3540,9 +3600,9 @@ function renderOvernight() {
         <td>${boardCell(x)}</td>
         <td class="num">${x.signal_close == null ? '—' : fmt(x.signal_close)}</td>
         <td class="num ${cls(x.chg)}">${x.chg == null ? '—' : fmt(x.chg, 2) + '%'}</td>
-        <td class="muted">9:25 集合竞价挂市价</td>
+        <td class="muted">${COPY.how || '9:25 集合竞价挂市价'}</td>
       </tr>`).join('')
-    : '<tr class="empty"><td colspan="7">明天没有符合条件的票 —— 连板 ≥3 且今天收实体阴线的，全市场一只都没有</td></tr>';
+    : `<tr class="empty"><td colspan="7">${esc(COPY.empty)}</td></tr>`;
 
   // 持仓状态：补记的要说清"几点抓的"，否则分不清是盘中真做了决定还是事后补的
   const openState = x => {

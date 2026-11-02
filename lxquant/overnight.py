@@ -404,6 +404,27 @@ def _is_td(date_str: str) -> bool:
     return datetime.strptime(date_str, "%Y-%m-%d").weekday() < 5
 
 
+def next_trade_day(date_str: str) -> str:
+    """date_str 之后的第一个交易日。没有它，界面上"明天买"遇到周五就变成周六了。"""
+    if not date_str:
+        return ""
+    try:
+        from .extdata import trade_days
+        ds = trade_days()
+        if ds:
+            later = sorted(d for d in ds if d > date_str)
+            if later:
+                return later[0]
+    except Exception:
+        pass
+    d = datetime.strptime(date_str, "%Y-%m-%d").date()
+    for _ in range(12):
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            return d.isoformat()
+    return ""
+
+
 def ref_day(now: datetime | None = None) -> str:
     """最近一个**已经收盘**的交易日。
 
@@ -530,6 +551,37 @@ def stats() -> dict:
     return out
 
 
+def _pending_ctx(st: dict, now: datetime | None = None) -> dict:
+    """这批待买「该在哪天买、现在算不算过期」。**界面文案只认这里，别再各自写"明日"**。
+
+    写死"明日待买"会错两次：
+      · 周一盘中打开，名单其实是**今天**要买的，而且 9:25 可能已经过了；
+      · 周五收盘生成的名单，下周一才买，中间隔着周末 —— 在日历上"明天"是周六。
+    所以统一算成 offset：0=今天 / 1=之后 / -1=已过期，前端只按这个选文案。
+    """
+    now = now or datetime.now()          # 可注入：测试要能固定"今天"，否则断言只能写成"0 或 1"
+    today = now.strftime("%Y-%m-%d")
+    ref = ref_day(now)
+    marks = st.get("marks") or {}
+    pend = st.get("pending") or []
+
+    if pend:
+        sig = str(pend[0].get("signal_date") or "")
+        buy = next_trade_day(sig)
+        off = 0 if buy == today else (1 if buy > today else -1)
+        return {"phase": "waiting", "buy_date": buy, "offset": off,
+                "signal_date": sig, "scan": marks.get("scan") or ""}
+
+    # 没有待买：要分清"已经买进去了""扫过了确实没票""根本没扫过"——三种文案完全不同
+    if any(str(o.get("buy_date") or "") == today for o in (st.get("open") or [])):
+        return {"phase": "bought", "buy_date": today, "offset": 0,
+                "signal_date": "", "scan": marks.get("scan") or ""}
+    scan = str(marks.get("scan") or "")
+    return {"phase": "fresh" if scan and scan >= ref else "no_scan",
+            "buy_date": "", "offset": None, "signal_date": "",
+            "scan": scan, "ref": ref, "today": today}
+
+
 def view() -> dict:
     """给界面用的一份快照"""
     st = _load()
@@ -537,7 +589,7 @@ def view() -> dict:
     last_emo = {"date": max(emo), **emo[max(emo)]} if emo else None
     return {
         "pending": st["pending"], "open": st["open"],
-        "emotion": last_emo,
+        "emotion": last_emo, "pending_ctx": _pending_ctx(st),
         "marks": st["marks"], "stats": stats(),
         "recent": _read_trades()[-40:][::-1],
         "params": {"min_streak": MIN_STREAK, "yin_max": YIN_MAX,
