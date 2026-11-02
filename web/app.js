@@ -2365,6 +2365,16 @@ const KLINE = {
   hover: null,
   MA_COL: ['#f2c14e', '#59b0ff', '#b07cff', '#28d1a6', '#ff8a4c'],
 };
+/* 各周期"一打开显示多少根"。
+   之前默认是把所有数据塞进一屏（z=1），日线 641 根 → 628px 宽里每根 2.6px，
+   K 线、量柱、月份标签全糊成一片，等于看不见。周线月线更糟（历史更长）。
+   现在按"能看清单根 K 线形状"给默认值：
+     日 120（约半年）  每根约 5.2px，能认出影线和实体
+     周 100（约两年）  每根约 6.3px
+     月 60（约五年）   每根约 10px
+   想看更长历史：滚轮缩小，z 最小到 1 就是全部。双击复位回这里。 */
+const KLINE_DEFAULT_BARS = { day: 120, week: 100, month: 60 };
+
 const KLINE_SUB = {
   vol: { name: '成交量', h: 84 },
   macd: { name: 'MACD', h: 92 },
@@ -2376,16 +2386,24 @@ const PERIOD_NAME = { day: '日线', week: '周线', month: '月线' };
 
 /** 当前周期这份图的状态（缩放 / 右端偏移），没有就建一份 */
 function klineUI(per) {
-  if (!KLINE.ui[per]) KLINE.ui[per] = { z: 1, off: 0 };
+  // z=null 表示"还没手动缩放过"，此时按 KLINE_DEFAULT_BARS 给默认视图。
+  // 一旦滚轮动过就有确定值，之后按 n/z 算，换股票也不会跳。
+  if (!KLINE.ui[per]) KLINE.ui[per] = { z: null, off: 0 };
   return KLINE.ui[per];
 }
-/** 某周期要画的根数：默认就是"把所有数据都塞进去"，缩小时最少 30 根 */
+/** 当前视图要画哪一段。size 永远不超过数据量（老代码 n<30 时会算超，取到 undefined）。 */
 function klineView(dat, per) {
   const n = dat.length;
   const ui = klineUI(per);
-  const size = Math.max(30, Math.min(n, Math.round(n / ui.z)));
+  let size;
+  if (ui.z == null) {
+    size = Math.min(n, KLINE_DEFAULT_BARS[per] || 120);
+  } else {
+    size = Math.round(n / ui.z);
+  }
+  size = Math.min(n, Math.max(30, size));
   const off = Math.max(0, Math.min(n - size, Math.round(ui.off)));
-  return { from: n - size - off, size, end: n - off };
+  return { from: Math.max(0, n - size - off), size, end: n - off };
 }
 /** 坐标点在绘图区里就画（十字光标 / 网格别溢到轴上去） */
 function lineIn(g, x1, y1, x2, y2, box) {
@@ -2497,14 +2515,9 @@ function drawKChart(cv, a, per) {
     g.fillText(`${PERIOD_NAME[per]}数据没取到（行情源可能临时不通，等会儿再点一次）`, 12, 24);
     return;
   }
+  // 显示哪一段统一由 klineView 决定（默认根数按周期在 KLINE_DEFAULT_BARS 里配）。
+  // 原来这里单独给日线砍到 240 根，周线月线却仍全塞 —— 两套规则，改一处忘一处。
   const v = klineView(dat, per);
-  // 日线默认只放最近 240 根：把 641 根全塞进一屏，每根不到 1px，K 线和量柱全糊成一条、
-  // 时间轴上的月份标签也会叠在一起。周线月线本身就不长（500+/120+），全放得下。
-  if (per === 'day' && v.size > 240) {
-    v.size = 240;
-    v.from = Math.max(0, dat.length - 240 - klineUI(per).off);
-    v.end = v.from + 240;
-  }
   const N = v.size;
   // 主图下半的成交量，只有副图选"成交量"时才占位；选了 MACD/KDJ/RSI 就把它让给副图，
   // 不然一屏里有两块成交量，指标反而被挤成一条缝（showVol / volH 已在上面算好）
@@ -2897,7 +2910,9 @@ function bindKlineInteraction(cv) {
       const ui = klineUI(per);
       const dx = e.clientX - cv._drag.x;
       const perPx = cv._k.W - 72;
-      const size = Math.max(30, Math.min(n, Math.round(n / ui.z)));
+      // 用 klineView 拿 size：z 可能是 null（还没缩放过），
+      // 直接写 n/ui.z 会得到 Infinity → 一拖就跳到"全部历史"。
+      const size = klineView(dat.bars || [], per).size;
       ui.off = Math.max(0, Math.min(n - size, cv._drag.off - dx * size / perPx));
       KLINE.hover = null; hideKlineTip(); redraw(); return;
     }
@@ -2922,15 +2937,21 @@ function bindKlineInteraction(cv) {
     const dat = ((S.detail || {}).kline || {})[cv._kp || 'day'] || {};
     if (!((dat.bars || []).length)) return;
     e.preventDefault();
-    const ui = klineUI(cv._kp || 'day');
-    ui.z = Math.max(1, Math.min(12, ui.z * (e.deltaY > 0 ? 0.82 : 1.22)));
+    const per = cv._kp || 'day';
+    const ui = klineUI(per);
+    const bars = dat.bars || [];
+    // 还没缩放过（z=null）时，先按当前默认视图折算出等效 z，再乘缩放系数。
+    // 否则 null * 1.22 = 0 → 被 max(1,…) 夹到 1 → 一滚就变成"全部历史"，正好反了。
+    const z0 = ui.z == null ? (bars.length / klineView(bars, per).size) : ui.z;
+    ui.z = Math.max(1, Math.min(12, z0 * (e.deltaY > 0 ? 0.82 : 1.22)));
     ui.off = 0;                       // 缩放后回到最右边（最新行情），最常看的就是这段
     KLINE.hover = null; hideKlineTip(); redraw();
   }, { passive: false });
-  // 双击复位到"全部数据"
+  // 双击复位到默认视图（日 120 / 周 100 / 月 60），不是"全部"——
+  // 全部塞进一屏每根不到 1px，复位到那里等于复位到看不清。
   cv.addEventListener('dblclick', () => {
     const per = cv._kp || 'day';
-    KLINE.ui[per] = { z: 1, off: 0 };
+    KLINE.ui[per] = { z: null, off: 0 };
     KLINE.hover = null; hideKlineTip(); redraw();
   });
 }
