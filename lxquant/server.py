@@ -666,14 +666,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "changed": n, **overnight.view()})
 
             if p == "/api/overnight/scan":
-                # 手动补跑：软件没开过、错过了 15:05，可以在这里补一份明日名单。
-                # 它会先结算今天该平的仓，再扫今天的首阴，所以重复点也不会重复记账。
+                # 手动补跑：先卖掉该卖的（buy_date < 今天），再扫今天的首阴并当场买入。
+                # 重复点不会重复记账（do_scan 按 code+buy_date 去重）。
+                from datetime import datetime as _dt
                 from . import overnight
-                ref = overnight.ref_day()      # 周末/开盘前也能补上一份，不会挂错日期
-                closed = overnight.do_settle(ref)
-                pend = overnight.do_scan(ref)
+                today = _dt.now().strftime("%Y-%m-%d")
+                closed = overnight.do_settle(today)
+                sig = overnight.do_scan(today)
                 return self._json({"ok": True, "closed": closed,
-                                   "pending": pend, **overnight.view()})
+                                   "bought": len([x for x in sig
+                                                  if str(x.get("buy_date")) == today]),
+                                   **overnight.view()})
             if p == "/api/cache/clear":
                 n = store.clear_cache(b.get("kind"))
                 return self._json({"ok": True, "removed": n, "cache": store.cache_info()})

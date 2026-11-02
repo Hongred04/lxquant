@@ -38,12 +38,14 @@ from .config import DATA_DIR
 MIN_STREAK = 3          # 前面至少 3 个连板才叫"龙头"，1~2 个板的首阴样本质量差
 YIN_MAX = 0.99          # 收盘 ≤ 开盘 × 0.99：实体阴线至少 1%，避免十字星误判
 HISTORY_KEEP = 15       # 连板历史保留天数（≥ MIN_STREAK 就够，留余量）
-# 集合竞价结束后才拿得到开盘价；**开盘价全天不变**，所以收盘前补记也是准的。
-# 窗口放宽到 14:55 是为了收集样本：软件 11 点才打开，也能补上当天这条记录。
-# 但会如实记下"几点抓的"，10:00 之后抓的标成补记 —— 验证执行率时要能区分。
-OPEN_FROM, OPEN_TO = "09:26", "14:55"
-ON_TIME_BY = "10:00"
-SETTLE_AT = "15:05"     # 收盘价落定后才结算
+# ---- 执行方式：和「选股」页同一套节奏 ----
+#   D 日 14:40   扫出今天的首阴，**当场按当时价买入**（不用等到明天 9:25）
+#   D+1 日 14:50 按当时的价卖出（T+1 满足）
+# 这是用户指定的操作方式：一天只在尾盘动一次，不需要早上盯集合竞价。
+BUY_AT = "14:40"        # 选股 + 买入
+SELL_AT = "14:50"       # 次日卖出（尾盘）
+LATE_AFTER = "15:00"    # 这之后才跑 = 补记（用收盘价，标记 late）
+TODAY_CLOSE = "15:00"
 
 # A 股 T+1：买入当天不许卖出。这是交易所规则，不是可配置项。
 # 早期版本按"次日开盘买、当天收盘卖"实现，那是 T+0，实盘不存在 ——
@@ -215,67 +217,6 @@ def _recent_trade_days(today: str, n: int) -> list:
 
 
 # ---------------------------------------------------------------- 三步状态机
-def do_open(today: str, snap=None) -> int:
-    """次日开盘：把昨日 pending 记成**今日信号**，抓下开盘价。
-
-    ⚠️ 这里记的是"信号"，不是"成交"。`exec` 三态：None=还没说 / True=买了 / False=没买。
-    此前的版本默认"软件在跑 = 你买了"，会把没下单的单子算进胜率 —— 账本就脏了，
-    而干净样本正是这套东西唯一的价值。买没买让用户在界面上点一下，默认留空。
-
-    返回本次记录到的信号数。当日只做一次（marks.open 挡住）。
-    """
-    st = _load()
-    if not st["pending"] or st["marks"].get("open") == today:
-        return 0
-    if snap is None:
-        from . import store
-        snap = store.get_list()
-    idx = {str(r["code"]): r for _, r in snap.iterrows()}
-
-    got = 0
-    for it in st["pending"]:
-        r = idx.get(str(it["code"]))
-        if r is None:
-            continue
-        o = float(r.get("open") or 0)
-        if o <= 0:
-            continue
-        ltype = limitup.limit_pct(it["code"], it.get("name", ""))
-        prev = float(r.get("prev_close") or 0) or it.get("signal_close") or o
-        # 一字跌停开：能买，但当天大概率卖不掉 → 仍然记录，交给结算时判顺延
-        one_word = (abs(float(r.get("high") or 0) - float(r.get("low") or 0)) < 1e-6
-                    and o <= prev * (1 - ltype + limitup.TOL))
-        # 信号日的证据必须整份带进来：板块、同板块涨停数、炸板次数、封板时间。
-        # 只留买卖价的话，事后没法回答"弱板是不是更差""板块有承接是不是更好" ——
-        # 而这两个问题正是这套策略接下来要验证的东西。
-        st["signals"].append({
-            "code": str(it["code"]), "name": it.get("name", ""),
-            "signal_date": it["signal_date"], "buy_date": today,
-            "streak": it.get("streak"), "signal_close": it.get("signal_close"),
-            "open": round(o, 3), "deferred": 0,
-            # 低开幅度当场就算出来：它是这套策略最核心的自变量，
-            # 而且信号日收盘价就在手边，没理由等到收盘结算才补。
-            "gap": (round((o / it["signal_close"] - 1) * 100, 2)
-                    if it.get("signal_close") else None),
-            "board": it.get("board") or "", "n_board": it.get("n_board"),
-            "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
-            "lbc_em": it.get("lbc_em"),
-            # 抓取时刻：10:00 前算准时。补记的记录价格仍然准确（开盘价不变），
-            # 但它证明不了"你那天真的在盘中做了决定"，统计执行率时要分开算。
-            "captured_at": time.strftime("%H:%M"),
-            "on_time": time.strftime("%H:%M") <= ON_TIME_BY,
-            # 你实际有没有下手：None=还没说（默认）/ True=买了 / False=没买。
-            # 不管哪种，这条信号的价格和影子收益都会留下来 —— 样本不能因为没下单就消失。
-            "exec": None, "exec_at": "",
-            "flag": "一字跌停开盘" if one_word else "",
-        })
-        got += 1
-    st["pending"] = []
-    st["marks"]["open"] = today
-    _save(st)
-    return got
-
-
 def do_settle(day: str, snap=None) -> int:
     """按 day 那天的收盘价平掉持仓。收盘仍一字跌停的顺延到下一日。
 
@@ -318,7 +259,8 @@ def do_settle(day: str, snap=None) -> int:
                 continue
             # 扛满 3 天也没跑掉：按收盘价强制结账，并如实标注
             it["flag"] = (it.get("flag") or "") + " 连续跌停未卖出"
-        ret = (px / it["open"] - 1) * 100 if it["open"] else 0.0
+        bp = float(it.get("buy_price") or it.get("open") or 0)
+        ret = (px / bp - 1) * 100 if bp else 0.0
         sc = it.get("signal_close") or 0
         ex = it.get("exec")            # None=未确认 / True=买了 / False=没买
         _append_trade({
@@ -328,7 +270,8 @@ def do_settle(day: str, snap=None) -> int:
             # 买入价 = 次日开盘价；信号日收盘也留着 —— 两者相除就是"低开幅度"，
             # 而低开幅度是这套策略最核心的自变量（实测：低开越深，反弹越强）。
             "signal_close": sc, "open": it["open"], "close": round(px, 3),
-            "gap": round((it["open"] / sc - 1) * 100, 2) if sc else None,
+            "buy_price": bp,
+            "gap": round((bp / sc - 1) * 100, 2) if sc else None,
             "hold_days": _days_between(it["buy_date"], day),
             # ret 是**影子收益**：按规则"开盘买、收盘卖"会拿到多少，与是否真下手无关。
             # 这样没买的信号也进得了统计 —— 否则样本全被"我那天没空"削掉。
@@ -347,9 +290,14 @@ def do_settle(day: str, snap=None) -> int:
 
 
 def do_scan(day: str, snap=None) -> list:
-    """扫 day 那天的收盘数据：更新涨停/连板，找出当天的「首阴」，作为**次日**待买。
+    """扫 day 的收盘/当前快照，找出首阴，**当场按快照价记为买入**。
 
-    `day` 是信号日，不一定是"今天"（周末补跑时是上周五）。
+    和旧版的根本区别：不再生成"明日待买"。用户的实际操作是
+    「14:40 看着盘选出票、当场买、第二天尾盘卖」，
+    所以选股和买入必须在同一天完成，买入价用**当时的价格**，
+    不是次日开盘价、也不是收盘价。
+
+    `day` 是信号日 = 买入日；周末补跑时传最近一个交易日。
     """
     st = _load()
     if snap is None:
@@ -367,18 +315,18 @@ def do_scan(day: str, snap=None) -> list:
         if not limitup.tradeable(code, nm):
             continue
         pc = float(r.get("prev_close") or 0)
-        px = float(r.get("price") or 0)
+        px = float(r.get("price") or 0)          # 当前价（14:40 就是 14:40 的价）
         op = float(r.get("open") or 0)
         if pc <= 0 or px <= 0 or op <= 0:
             continue
         chg = px / pc - 1
-        if abs(chg) > 0.21:                    # 除权/异常，不参与
+        if abs(chg) > 0.21:                       # 除权/异常，不参与
             continue
         if limitup.is_limit_up(code, chg, nm):
             prev_s = int(hist.get(prev_day, {}).get(code, 0)) if prev_day else 0
             today_lu[code] = prev_s + 1
             continue
-        # ---- 首阴：昨天连板 ≥3，今天第一根实体阴线
+        # ---- 首阴：昨天连板 ≥3，今天第一根实体阴线（用当前价判，不等收盘）
         if not prev_day:
             continue
         s = int(hist.get(prev_day, {}).get(code, 0))
@@ -390,10 +338,10 @@ def do_scan(day: str, snap=None) -> list:
             "code": code, "name": nm, "signal_date": day,
             "streak": s, "signal_close": round(px, 2),
             "open": round(op, 2), "chg": round(chg * 100, 2),
+            "buy_price": round(px, 3),
         })
 
-    # 补齐日线反推不出来的东西：板块归属、同板块今日涨停数、炸板次数。
-    # 取不到就跳过 —— 名单本身不依赖它，只是少了"这是不是题材核心"的判断依据。
+    # 补齐日线反推不出来的东西：板块归属、同板块今日涨停数、炸板次数
     emo = {}
     try:
         from . import emotion as _emo
@@ -412,28 +360,41 @@ def do_scan(day: str, snap=None) -> list:
         for d in sorted(st["emotion"])[:-10]:
             st["emotion"].pop(d, None)
 
-    # 昨天那份名单如果连开盘价都没抓到（软件整天没开），记一笔"缺口"。
-    # 注意这不是"你没买"——买没买是 exec 字段，跟软件开没开是两件事。
-    # 同一天重复生成名单（手动补跑、调度重入）不能算缺口：signal_date >= day 的直接跳过。
-    for it in st["pending"]:
-        if str(it.get("signal_date") or "") >= day:
+    # ---- 当场买入（同一天同一只不重复记；重复跑只更新价格）
+    hm = datetime.now().strftime("%H:%M")
+    late = hm >= LATE_AFTER
+    have = {(str(x.get("code")), str(x.get("buy_date"))) for x in st["signals"]}
+    n_new = 0
+    for it in fresh:
+        key = (str(it["code"]), day)
+        if key in have:
+            for x in st["signals"]:
+                if (str(x.get("code")), str(x.get("buy_date"))) == key:
+                    x["buy_price"] = it["buy_price"]
+                    x["signal_close"] = it["signal_close"]
+                    x["captured_at"] = hm
+                    x["late"] = late
             continue
-        _append_trade({
-            "signal_date": it["signal_date"], "buy_date": "", "sell_date": "",
-            "code": it["code"], "name": it.get("name", ""),
-            "streak": it.get("streak"), "signal_close": it.get("signal_close"),
-            "open": None, "close": None, "gap": None, "hold_days": None,
-            "ret": None, "status": "gap", "exec": it.get("exec"),
-            "exec_at": it.get("exec_at") or "", "deferred": 0,
+        st["signals"].append({
+            "code": it["code"], "name": it["name"],
+            "signal_date": day, "buy_date": day,        # 选股与买入同一天
+            "streak": it["streak"], "signal_close": it["signal_close"],
+            "open": it["open"],                          # 当日开盘（算振幅用）
+            "buy_price": it["buy_price"],                # ★ 14:40 的实际买入价
+            "gap": None, "deferred": 0,
             "board": it.get("board") or "", "n_board": it.get("n_board"),
             "zbc": it.get("zbc"), "fbt": it.get("fbt") or "",
-            # 这条只说明开盘价没抓到（软件没开），不代表你没买 —— 样本缺口，不是执行记录
-            "flag": "开盘价没抓到（当天软件没运行）",
+            "lbc_em": it.get("lbc_em"),
+            "captured_at": hm, "late": late,
+            "exec": None, "exec_at": "",
+            "flag": "",
         })
-    st["pending"] = sorted(fresh, key=lambda x: -int(x.get("streak") or 0))
+        n_new += 1
+
+    st["pending"] = []          # 旧概念，保留字段但不再使用
     st["marks"]["scan"] = day
     _save(st)
-    return st["pending"]
+    return st["signals"]
 
 
 def _is_td(date_str: str) -> bool:
@@ -478,7 +439,7 @@ def ref_day(now: datetime | None = None) -> str:
     """
     now = now or datetime.now()
     today = now.strftime("%Y-%m-%d")
-    if _is_td(today) and now.strftime("%H:%M") >= SETTLE_AT:
+    if _is_td(today) and now.strftime("%H:%M") >= SELL_AT:
         return today
     d = now.date()
     for _ in range(12):
@@ -490,32 +451,35 @@ def ref_day(now: datetime | None = None) -> str:
 
 
 def tick(now: datetime | None = None) -> str:
-    """调度入口：按时间决定该做哪一步。幂等，重复调用无副作用。
+    """调度入口。一天只在尾盘动两次：
 
-    顺序是「先开盘买入，再结算+出名单」：
-      · 开盘这一步必须用**真实今天**（周一 9:26 买的是周一的价）；
-      · 结算和出名单用 ref_day（最近一个已收盘的交易日）——
-        软件周六日打开也能补上周五那份名单，不会因为没开就断档。
+        D   14:40 之后   扫今天的首阴 → 当场按当时价买入
+        D+1 14:50 之后   卖掉所有 buy_date < 今天的持仓
+
+    幂等：marks 记着今天做过哪几步，重复调用不重复记账。
+    15:00 之后才跑 = 补记（用收盘价），记 late=True，方便事后区分。
     """
     now = now or datetime.now()
     today = now.strftime("%Y-%m-%d")
     hm = now.strftime("%H:%M")
-    ref = ref_day(now)
-    if not ref:
+    if not _is_td(today):
         return ""
 
     st = _load()
-    acted = ""
-    if _is_td(today) and OPEN_FROM <= hm < OPEN_TO and st["pending"] and st["marks"].get("open") != today:
-        n = do_open(today)
-        acted = f"open:{n}"
+    acted = []
 
-    st = _load()
-    if st["marks"].get("settle") != ref:
-        c = do_settle(ref)
-        p = do_scan(ref)
-        acted = (acted + " " if acted else "") + f"settle:{c} scan:{len(p)}"
-    return acted
+    # ---- 先卖（T+1：只卖 buy_date 严格早于今天的）
+    if hm >= SELL_AT and st["marks"].get("settle") != today:
+        n = do_settle(today)
+        acted.append(f"sell:{n}")
+
+    # ---- 再买（扫今天的首阴并当场记）
+    if hm >= BUY_AT and st["marks"].get("scan") != today:
+        sig = do_scan(today)
+        today_new = [x for x in sig if str(x.get("buy_date")) == today]
+        acted.append(f"buy:{len(today_new)}")
+
+    return " ".join(acted)
 
 
 def _days_between(a: str, b: str) -> int | None:
@@ -532,7 +496,8 @@ CSV_FIELDS = [
     ("signal_date", "信号日"), ("buy_date", "买入日"), ("sell_date", "卖出日"),
     ("code", "代码"), ("name", "名称"), ("streak", "连板"),
     ("board", "板块"), ("n_board", "同板块当日涨停数"), ("zbc", "炸板次数"),
-    ("fbt", "首封时间"), ("signal_close", "信号日收盘"), ("open", "买入价(开盘)"),
+    ("fbt", "首封时间"), ("signal_close", "信号日尾盘价"),
+    ("buy_price", "买入价(14:40)"), ("open", "当日开盘"),
     ("gap", "低开幅度%"), ("close", "卖出价"), ("ret", "影子收益%"),
     ("hold_days", "持天数"), ("exec", "我买了吗"), ("exec_at", "标记时刻"),
     ("captured_at", "记录时刻"), ("on_time", "是否准时"),
@@ -680,35 +645,33 @@ def mark_exec(code: str, buy_date: str, exec_: bool | None) -> int:
 
 
 def _pending_ctx(st: dict, now: datetime | None = None) -> dict:
-    """这批待买「该在哪天买、现在算不算过期」。**界面文案只认这里，别再各自写"明日"**。
+    """给界面判断「今天是什么状态」。**文案只认这里，别在别处写死"待买/明日"**。
 
-    写死"明日待买"会错两次：
-      · 周一盘中打开，名单其实是**今天**要买的，而且 9:25 可能已经过了；
-      · 周五收盘生成的名单，下周一才买，中间隔着周末 —— 在日历上"明天"是周六。
-    所以统一算成 offset：0=今天 / 1=之后 / -1=已过期，前端只按这个选文案。
+    执行方式改成"尾盘选股即买入"之后，状态只剩三种：
+      bought   今天已经买入了 N 只（14:40 那一步做过了）
+      holding  今天没新信号，但手里还有昨天买的没卖
+      empty    扫过了，今天一只都没选出来
+      no_scan  今天还没扫过
+
+    `buy_date == signal_date`（同一天选、同一天买），所以"能不能卖"看
+    `next_trade_day(buy_date)` 是否 <= 今天 —— 那是 T+1 的最早可卖日。
     """
-    now = now or datetime.now()          # 可注入：测试要能固定"今天"，否则断言只能写成"0 或 1"
+    now = now or datetime.now()
     today = now.strftime("%Y-%m-%d")
-    ref = ref_day(now)
     marks = st.get("marks") or {}
-    pend = st.get("pending") or []
+    sigs = st.get("signals") or []
 
-    if pend:
-        sig = str(pend[0].get("signal_date") or "")
-        buy = next_trade_day(sig)
-        off = 0 if buy == today else (1 if buy > today else -1)
-        return {"phase": "waiting", "buy_date": buy, "offset": off,
-                "signal_date": sig, "scan": marks.get("scan") or ""}
-
-    # 没有待买：要分清"今天已经出过信号""扫过了确实没票""根本没扫过"——三种文案完全不同。
-    # 注意叫 signaled 不叫 bought：今天有信号 ≠ 你买了，买没买是每行 exec 的事。
-    if any(str(o.get("buy_date") or "") == today for o in (st.get("signals") or [])):
-        return {"phase": "signaled", "buy_date": today, "offset": 0,
-                "signal_date": "", "scan": marks.get("scan") or ""}
+    mine = [x for x in sigs if str(x.get("buy_date") or "") == today]
     scan = str(marks.get("scan") or "")
-    return {"phase": "fresh" if scan and scan >= ref else "no_scan",
-            "buy_date": "", "offset": None, "signal_date": "",
-            "scan": scan, "ref": ref, "today": today}
+    if mine:
+        return {"phase": "bought", "date": today, "n": len(mine),
+                "scan": scan, "today": today}
+    holding = [x for x in sigs if str(x.get("buy_date") or "") < today]
+    if holding:
+        return {"phase": "holding", "date": today, "n": len(holding),
+                "scan": scan, "today": today}
+    return {"phase": "empty" if scan == today else "no_scan",
+            "date": today, "n": 0, "scan": scan, "today": today}
 
 
 def view() -> dict:
@@ -729,6 +692,7 @@ def view() -> dict:
         "marks": st["marks"], "stats": stats(),
         "recent": _read_trades()[-40:][::-1],
         "params": {"min_streak": MIN_STREAK, "yin_max": YIN_MAX,
-                   "open_from": OPEN_FROM, "settle_at": SETTLE_AT},
+                   "buy_at": BUY_AT, "sell_at": SELL_AT,
+                   "min_hold_days": MIN_HOLD_DAYS},
         "now": time.strftime("%Y-%m-%d %H:%M:%S"),
     }

@@ -85,6 +85,8 @@ class Env:
 
 
 HIST = {"2026-10-29": {"600000": 1}, "2026-10-30": {"600000": 2}, TODAY: {}}
+# 3 连板夹具：do_scan 要求"昨天连板 ≥ MIN_STREAK(3)"，HIST 只有 2 连板，扫不出东西
+HIST3 = {"2026-10-29": {"600000": 2}, "2026-10-30": {"600000": 3}, TODAY: {}}
 
 
 def test_scan_finds_first_yin():
@@ -102,11 +104,12 @@ def test_scan_picks_yin_after_streak():
     hist = {"2026-10-29": {"600000": 2}, "2026-10-30": {"600000": 3}, TODAY: {}}
     with Env(hist):
         snap = _snap([_row("600000", "浦发银行", 10.5, 11.0, 11.0)])   # 开 11 收 10.5
-        pending = overnight.do_scan(TODAY, snap)
-        assert len(pending) == 1, pending
-        assert pending[0]["code"] == "600000"
-        assert pending[0]["streak"] == 3
-        assert pending[0]["signal_close"] == 10.5
+        sig = overnight.do_scan(TODAY, snap)
+        mine = [x for x in sig if x["buy_date"] == TODAY]
+        assert len(mine) == 1, sig
+        assert mine[0]["code"] == "600000"
+        assert mine[0]["streak"] == 3
+        assert mine[0]["signal_close"] == 10.5
 
 
 def test_scan_ignores_shallow_yin_and_low_streak():
@@ -121,19 +124,31 @@ def test_scan_ignores_shallow_yin_and_low_streak():
         assert overnight.do_scan(TODAY, snap) == []
 
 
-def test_open_records_open_price_once():
-    with Env(HIST):
+def test_scan_buys_on_the_spot():
+    """14:40 扫到首阴就当场买入：买入价 = 当前快照价，不是开盘价也不是收盘价。"""
+    with Env(HIST3):
         st = overnight._load()
-        st["pending"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
-                          "streak": 3, "signal_close": 10.5}]
+        st["signals"] = []
         overnight._save(st)
-        snap = _snap([_row("600000", "浦发银行", 10.8, 10.2, 10.5)])
-        assert overnight.do_open(NEXT, snap) == 1
-        st = overnight._load()
-        assert st["signals"][0]["open"] == 10.2
-        assert st["pending"] == []
-        # 再调一次不能重复记
-        assert overnight.do_open(NEXT, snap) == 0
+        # 当前价 10.20（14:40 的价），开盘 10.80 → 实体阴线
+        snap = _snap([_row("600000", "浦发银行", 10.20, 10.80, 11.0)])
+        sig = overnight.do_scan(TODAY, snap)
+        mine = [x for x in sig if x["buy_date"] == TODAY]
+        assert len(mine) == 1, sig
+        assert abs(mine[0]["buy_price"] - 10.20) < 1e-6, mine[0]
+        assert mine[0]["signal_date"] == mine[0]["buy_date"], "选股与买入必须同一天"
+
+
+def test_scan_is_idempotent_for_same_day():
+    """同一天重复扫不能重复记一笔，只更新价格。"""
+    with Env(HIST3):
+        snap = _snap([_row("600000", "浦发银行", 10.20, 10.80, 11.0)])
+        overnight.do_scan(TODAY, snap)
+        snap2 = _snap([_row("600000", "浦发银行", 10.05, 10.80, 11.0)])
+        sig = overnight.do_scan(TODAY, snap2)
+        mine = [x for x in sig if x["buy_date"] == TODAY]
+        assert len(mine) == 1, f"重复记了 {len(mine)} 笔"
+        assert abs(mine[0]["buy_price"] - 10.05) < 1e-6, "价格应更新为最新快照"
 
 
 def test_settle_computes_return():
@@ -169,174 +184,66 @@ def test_stuck_limit_down_is_deferred_not_closed():
         assert overnight._read_trades() == []
 
 
-def test_missed_signal_is_recorded():
-    """昨天出了名单，今天开盘没执行 → 如实记一笔「错过」，不能当没发生"""
-    with Env(HIST):
-        st = overnight._load()
-        st["pending"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
-                          "streak": 3, "signal_close": 10.5}]
-        overnight._save(st)
-        overnight.do_scan(NEXT, _snap([_row("600001", "B", 10.0, 10.0, 10.0)]))
-        t = overnight._read_trades()
-        assert len(t) == 1 and t[0]["status"] == "gap", t
-        s = overnight.stats()
-        assert s["gaps"] == 1 and s["signal"]["n"] == 0
-
-
-def test_tick_is_idempotent_in_one_day():
-    """调度每 60 秒探一次，同一个 15:05 不能重复记账"""
+def test_tick_buys_then_sells_next_day():
+    """完整一天：14:40 扫到就买；次日 14:50 卖掉。重复调不重复记账。"""
     from datetime import datetime
-    # 注意：这里的连板必须 ≥3，否则根本不是首阴 —— 复用 HIST（只有 2 板）会测不到东西
-    hist = {"2026-10-29": {"600000": 2}, "2026-10-30": {"600000": 3}, TODAY: {}}
-    with Env(hist):
-        snap = _snap([_row("600000", "浦发银行", 10.5, 11.0, 11.0)])
-        # 用固定快照替换 store.get_list，避免联网
-        import lxquant.store as store_mod
+    import lxquant.store as store_mod
+
+    with Env(HIST3):
+        buy_snap = _snap([_row("600000", "浦发银行", 10.2, 10.8, 11.0)])
+        sell_snap = _snap([_row("600000", "浦发银行", 10.9, 10.5, 10.2)])
+        saved = store_mod.get_list
+        try:
+            store_mod.get_list = lambda *a, **k: buy_snap
+            overnight.tick(datetime(2026, 11, 2, 14, 45))
+            sig = overnight._load()["signals"]
+            assert len(sig) == 1 and sig[0]["buy_date"] == TODAY, sig
+            assert abs(sig[0]["buy_price"] - 10.2) < 1e-6
+
+            overnight.tick(datetime(2026, 11, 2, 14, 52))
+            assert len(overnight._load()["signals"]) == 1, "同一天重复买入了"
+
+            store_mod.get_list = lambda *a, **k: sell_snap
+            overnight.tick(datetime(2026, 11, 3, 14, 52))
+            assert overnight._load()["signals"] == [], "应该已经卖掉"
+            t = overnight._read_trades()
+            assert len(t) == 1 and t[0]["sell_date"] == "2026-11-03", t
+            assert abs(t[0]["ret"] - 6.86) < 0.1, t[0]["ret"]      # 10.9/10.2-1
+        finally:
+            store_mod.get_list = saved
+
+
+def test_tick_does_not_sell_on_buy_day():
+    """14:45 买、14:55 再跑一次，不能当天卖掉（T+1）"""
+    from datetime import datetime
+    import lxquant.store as store_mod
+
+    with Env(HIST3):
+        # 必须收实体阴线：10.20 < 10.80×0.99，否则扫不出信号
+        snap = _snap([_row("600000", "浦发银行", 10.20, 10.80, 11.0)])
         saved = store_mod.get_list
         store_mod.get_list = lambda *a, **k: snap
         try:
-            at = datetime(2026, 11, 2, 15, 6)
-            overnight.tick(at)
-            first = overnight._load()["pending"]
-            overnight.tick(at)
-            second = overnight._load()["pending"]
-            assert len(first) == len(second) == 1
-            # 再来一次也不该多出成交记录
+            overnight.tick(datetime(2026, 11, 2, 14, 45))
+            overnight.tick(datetime(2026, 11, 2, 14, 55))
+            assert len(overnight._load()["signals"]) == 1, "当天就被卖了，违反 T+1"
             assert overnight._read_trades() == []
         finally:
             store_mod.get_list = saved
 
 
-def test_ref_day_uses_last_closed_session():
-    """周六日打开软件，也要拿周五的数据出名单，不能把日期挂到周末"""
-    from datetime import datetime
-    assert overnight.ref_day(datetime(2026, 11, 1, 10, 0)) == "2026-10-30"   # 周日
-    assert overnight.ref_day(datetime(2026, 10, 31, 22, 0)) == "2026-10-30"  # 周六
-    assert overnight.ref_day(datetime(2026, 11, 2, 9, 0)) == "2026-10-30"    # 周一开盘前
-    assert overnight.ref_day(datetime(2026, 11, 2, 15, 30)) == "2026-11-02"  # 周一收盘后
-
-
-def test_trade_record_keeps_signal_evidence():
-    """成交记录必须自带信号日的全部证据 —— 否则事后没法验证
-    「弱板是不是更差」「低开越深是不是弹得越猛」。"""
-    with Env(HIST):
-        st = overnight._load()
-        st["pending"] = [{
-            "code": "002708", "name": "光洋股份", "signal_date": TODAY,
-            "streak": 4, "signal_close": 20.0, "board": "汽车零部",
-            "n_board": 3, "zbc": 17, "fbt": "09:25:00", "lbc_em": 4,
-        }]
-        overnight._save(st)
-
-        # 次日开盘 19.0（低开 5%），当天收盘 19.6
-        overnight.do_open(NEXT, _snap([_row("002708", "光洋股份", 19.0, 19.0, 20.0)]))
-        held = overnight._load()["signals"][0]
-        assert held["board"] == "汽车零部" and held["zbc"] == 17, held
-
-        overnight.do_settle(DAY3, _snap([_row("002708", "光洋股份", 19.6, 19.0, 20.0)]))
-        t = overnight._read_trades()[0]
-        assert t["signal_close"] == 20.0
-        assert abs(t["gap"] - (-5.0)) < 0.01, t["gap"]          # 低开幅度 = 19/20-1
-        assert t["board"] == "汽车零部" and t["zbc"] == 17
-        assert t["hold_days"] >= 1                              # T+1：至少隔一天
-        assert abs(t["ret"] - 3.16) < 0.05, t["ret"]            # 19.6/19-1
-
-
-def test_export_csv_headers_and_rows():
-    with Env(HIST):
-        overnight._append_trade({
-            "signal_date": TODAY, "buy_date": NEXT, "sell_date": NEXT,
-            "code": "002708", "name": "光洋股份", "streak": 4,
-            "board": "汽车零部", "n_board": 0, "zbc": 17,
-            "signal_close": 20.0, "open": 19.0, "gap": -5.0,
-            "close": 19.6, "ret": 3.16, "hold_days": 0,
-            "status": "settled", "deferred": 0, "flag": "",
-        })
-        csv = overnight.export_csv()
-        lines = [x for x in csv.strip().split("\n") if x]
-        assert "代码" in lines[0] and "低开幅度%" in lines[0], lines[0]
-        assert len(lines) == 2
-        assert "002708" in lines[1] and "汽车零部" in lines[1]
-
-
-def test_export_csv_quotes_commas():
-    with Env(HIST):
-        overnight._append_trade({"code": "000001", "name": 'A,B"公司',
-                                 "status": "gap", "flag": "x,y"})
-        csv = overnight.export_csv()
-        row = csv.strip().split("\n")[1]
-        assert '"A,B""公司"' in row, row
-
-
-def test_next_trade_day_skips_weekend():
-    """周五收盘生成的名单，下一个买入日是周一 —— 不是"明天"（周六）"""
-    assert overnight.next_trade_day("2026-10-30") == "2026-11-02"
-    assert overnight.next_trade_day("2026-10-29") == "2026-10-30"
-
-
-def test_pending_ctx_offsets():
-    """界面文案全靠 offset：0=今天买 / 1=之后买 / -1=已过期。错一个就会写出"明天"却指向今天。"""
-    from datetime import datetime as _dt
-    with Env(HIST):
-        st = overnight._load()
-        st["pending"] = [{"code": "600000", "signal_date": "2026-10-30"}]
-        st["signals"] = []
-        overnight._save(st)
-
-        # 周五晚上生成 → 买入日是下周一
-        c1 = overnight._pending_ctx(st, _dt(2026, 10, 30, 16, 0))
-        assert (c1["phase"], c1["buy_date"], c1["offset"]) == ("waiting", "2026-11-02", 1)
-
-        # 周一早上 8 点 → 今天买
-        c2 = overnight._pending_ctx(st, _dt(2026, 11, 2, 8, 0))
-        assert (c2["buy_date"], c2["offset"]) == ("2026-11-02", 0)
-
-        # 周二才打开 → 已经过期
-        c3 = overnight._pending_ctx(st, _dt(2026, 11, 3, 10, 0))
-        assert c3["offset"] == -1, c3
-
-
-def test_pending_ctx_signaled_today():
-    """今天已经出过信号，就不能再写"明天没有符合条件的票"——但也不该说成"已买入" """
-    today = __import__("time").strftime("%Y-%m-%d")
-    with Env(HIST):
-        st = overnight._load()
-        st["pending"] = []
-        st["signals"] = [{"code": "600000", "buy_date": today}]
-        overnight._save(st)
-        assert overnight._pending_ctx(st)["phase"] == "signaled"
-
-
-def test_pending_ctx_no_scan_vs_having_none():
-    """'还没扫过' 和 '扫过但没有票' 是两件事，文案不能混"""
-    with Env(HIST):
-        st = overnight._load()
-        st["pending"] = []
-        st["signals"] = []
-        st["marks"] = {}
-        overnight._save(st)
-        assert overnight._pending_ctx(st)["phase"] == "no_scan"
-
-        st["marks"] = {"scan": __import__("time").strftime("%Y-%m-%d")}
-        overnight._save(st)
-        assert overnight._pending_ctx(st)["phase"] == "fresh"
-
-
 # ---------------------------------------------------------------- 信号 ≠ 成交
-def test_open_does_not_assume_you_bought():
-    """do_open 只记信号，不能默认"软件在跑 = 你买了"。
+def test_scan_does_not_assume_you_bought():
+    """扫完记账时 exec 必须是 None（还没说），不能默认"软件扫到 = 你买了"。
 
-    这一条是这套东西的底线：账本一旦混进没下过单的"成交"，
+    这一条是账本的底线：一旦混进没下过单的"成交"，
     后面所有胜率、盈亏比都不可信，而干净样本是它唯一的价值。
     """
-    with Env(HIST):
-        st = overnight._load()
-        st["pending"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
-                          "streak": 3, "signal_close": 10.0}]
-        overnight._save(st)
-        overnight.do_open(NEXT, _snap([_row("600000", "浦发银行", 10.2, 10.0, 10.5)]))
-        sig = overnight._load()["signals"][0]
-        assert sig["exec"] is None, f"默认必须是「还没说」，实际 {sig['exec']!r}"
+    with Env(HIST3):
+        snap = _snap([_row("600000", "浦发银行", 10.20, 10.80, 11.0)])
+        sig = overnight.do_scan(TODAY, snap)
+        mine = [x for x in sig if x["buy_date"] == TODAY]
+        assert mine[0]["exec"] is None, f"默认必须是「还没说」，实际 {mine[0]['exec']!r}"
 
 
 def test_mark_exec_three_states():
@@ -406,15 +313,18 @@ def test_load_migrates_legacy_open_key():
         assert st["signals"][0]["exec"] is None
 
 
-def test_open_computes_gap_on_the_spot():
-    """低开幅度在抓到开盘价时就要算出来 —— 它是核心自变量，不该等结算。"""
-    with Env(HIST):
-        st = overnight._load()
-        st["pending"] = [{"code": "600000", "name": "浦发银行", "signal_date": TODAY,
-                          "streak": 3, "signal_close": 10.0}]
-        overnight._save(st)
-        overnight.do_open(NEXT, _snap([_row("600000", "浦发银行", 9.5, 9.5, 10.0)]))
-        assert abs(overnight._load()["signals"][0]["gap"] - (-5.0)) < 0.01
+def test_scan_records_current_price_not_close():
+    """买入价必须是**扫描那一刻的价**，不是开盘价。
+
+    这是这套执行方式的核心：14:40 看到什么价就按什么价成交。
+    用它和开盘价比，才知道当天是涨是跌（表格里那一列就是干这个的）。
+    """
+    with Env(HIST3):
+        snap = _snap([_row("600000", "浦发银行", 9.50, 10.80, 11.0)])
+        sig = overnight.do_scan(TODAY, snap)
+        mine = [x for x in sig if x["buy_date"] == TODAY][0]
+        assert abs(mine["buy_price"] - 9.50) < 1e-6
+        assert abs(mine["open"] - 10.80) < 1e-6, "开盘价也要留着，用来算当天振幅"
 
 
 # ---------------------------------------------------------------- T+1 硬约束

@@ -3478,7 +3478,7 @@ async function rescanOvernight() {
     S.ovn = await api('/api/overnight/scan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
     });
-    toast('已按最新行情重新生成明日名单');
+    toast('已扫一遍，按最新价记入持仓');
   } catch (e) {
     toast('生成失败：' + (e && e.message ? e.message : e), true);
   }
@@ -3498,46 +3498,49 @@ async function rescanOvernight() {
       fresh                   扫过了，确实没有符合条件的票
       no_scan                 还没跑过扫描 —— 和"没有票"是两件事
 */
-function overnightCopy(ctx, signals) {
-  const off = ctx.offset, buyOn = ctx.buy_date || '';
-  const phase = ctx.phase || 'fresh';
+/** 隔夜低吸页的全部用户可见文案 —— 只按 pending_ctx 选一套。
 
-  if (phase === 'waiting') {
-    if (off === 0) {
-      return { kpi: '今天待买', sub: '今天 9:25 挂单', title: '今天待买',
-        note: '今天 9:25 集合竞价挂单，成交价就是开盘价', how: '今天 9:25 挂市价' };
-    }
-    if (off === -1) {
-      return { kpi: '待买·已过期', sub: (buyOn || '') + ' 的开盘已过', title: '待买（已过期）',
-        note: `这批该在 ${buyOn} 开盘买，已经过了；收盘后会自动记一笔「错过」`, how: '已过期',
-        empty: `这批信号（${ctx.signal_date || '—'} 收盘选出）的买点已经过去，不会再执行` };
-    }
-    return { kpi: '明日待买', sub: `次日 ${buyOn} 9:25 挂单`, title: '明日待买',
-      note: `${buyOn} 9:25 集合竞价挂单，成交价就是开盘价`, how: '次日 9:25 挂市价' };
+    执行方式：**D 日 14:40 选出即买入，D+1 日 14:50 卖出**（T+1）。
+    所以这里没有"明日待买"这个概念了 —— 选股和买入是同一天，
+    页面上只可能是"今天买了 / 手里还有昨天的没卖 / 今天没票 / 还没扫"。
+
+    phase 取值来自 overnight._pending_ctx()：
+      bought    今天已经买入（14:40 那一步做过了）
+      holding   今天没新信号，手里还有昨天的
+      empty     扫过了，今天一只都没选出来
+      no_scan   今天还没扫过 —— 和"没有票"是两件事
+*/
+function overnightCopy(ctx, signals) {
+  const phase = ctx.phase || 'no_scan';
+  const n = (signals || []).length;
+
+  if (phase === 'bought') {
+    return { kpi: '今天买入', sub: `14:40 按当时价成交 ${ctx.n || n} 只`, title: '今天买入',
+      note: '第二天尾盘（14:50 之后）自动卖出 —— T+1，当天买不能当天卖',
+      empty: `今天买了 ${ctx.n || n} 只，见下面` };
   }
-  if (phase === 'signaled') {
-    const n = (signals || []).length;
-    return { kpi: '今天信号', sub: '在下面标记买没买', title: '今天这批已记录',
-      note: '见下面「今日信号」—— 买没买点一下，收盘后按影子收益结算',
-      empty: `今天记录了 ${n} 只，见下面「今日信号」；买没买随手标一下就行` };
+  if (phase === 'holding') {
+    return { kpi: '持仓待卖', sub: `${ctx.n || n} 只等尾盘卖出`, title: '持仓（等卖出）',
+      note: '今天没选出新票；下面是昨天买的，尾盘 14:50 之后自动卖',
+      empty: `手里还有 ${ctx.n || n} 只，今天没有新信号` };
   }
   if (phase === 'no_scan') {
-    return { kpi: '待买', sub: '名单还没生成', title: '待买名单还没生成',
-      note: `上次生成：${ctx.scan || '从未'}　·　点左上角「重新生成明日名单」`,
-      empty: '还没跑过收盘扫描，所以没有名单 —— 不是"没有票"' };
+    return { kpi: '今天', sub: '还没扫过', title: '今天还没扫描',
+      note: `上次扫描：${ctx.scan || '从未'}　·　14:40 之后自动跑，也可以点左上角手动跑`,
+      empty: '今天还没跑过扫描，所以没有名单 —— 不是"没有票"' };
   }
-  return { kpi: '明日待买', sub: '没有符合条件的票', title: '明日待买',
-    note: '收盘后自动生成',
+  return { kpi: '今天', sub: '没有符合条件的票', title: '今天没有信号',
+    note: '14:40 自动扫，连板 ≥3 且收实体阴线才买',
     empty: '今天没有符合条件的票 —— 连板 ≥3 且收实体阴线的，全市场一只都没有' };
 }
 
 function renderOvernight() {
   const d = S.ovn;
   const st = (d && d.stats) || {};
-  const pend = (d && d.pending) || [];
-  // signals = 今天的「信号」，不是你买了的持仓。买没买看每行的 exec：
-  // null=还没标 / true=买了 / false=没买。价格和影子收益跟这个字段无关，一律留档。
+  // signals = 手上的持仓（14:40 买入、还没卖出的）。一天只有一批：
+  // 今天买的，或昨天买的还没卖。买没买由 exec 标（选股即买入，默认按买了算）。
   const signals = (d && d.signals) || [];
+  const held = signals;                       // 别名，读代码时更清楚
   const recent = (d && d.recent) || [];
   const show = (sel, on) => { const el = $(sel); if (el) el.hidden = !on; };
 
@@ -3554,7 +3557,7 @@ function renderOvernight() {
   if (!d) {
     show('#ovn-empty', true);
     show('#ovn-kpis', false);
-    ['#ovn-pending', '#ovn-open', '#ovn-recent'].forEach(s => show(s, false));
+    ['#ovn-open', '#ovn-recent'].forEach(s => show(s, false));
     const m = $('#ovn-meta'); if (m) m.textContent = '读取失败，刷新一下试试';
     return;
   }
@@ -3565,23 +3568,19 @@ function renderOvernight() {
 
   // 文案表单独成函数（overnightCopy），这里只取结果 —— 改文案不用翻渲染逻辑
   const ctx = d.pending_ctx || {};
-  const phase = ctx.phase || 'fresh';
+  const phase = ctx.phase || 'no_scan';
   const COPY = overnightCopy(ctx, signals);
 
-  // 数量要跟标题对上：写"今天信号"，数字就得是今天抓到的条数，不是待买数。
-  const todaySig = signals.filter(o => String(o.buy_date || '') === String(ctx.buy_date || '')).length;
-  const kv = phase === 'signaled' ? todaySig : pend.length;
   const sg = st.signal || {}, rl = st.real || {};
   const uns = signals.filter(x => x.exec == null).length;
 
-  // 两张核心卡：全部信号（衡量规则） / 实际买入（衡量执行）。
-  // 分开摆是刻意的 —— 混在一起就分不清"规则不行"还是"我没执行好"。
+  // 六张卡：今天的状态 / 待标记 / 全部信号 / 实际买入 / 均值 / 盈亏比
   $('#ovn-kpis').innerHTML = [
-    { k: COPY.kpi, v: kv ? kv + ' 只' : '0 只', s: COPY.sub },
+    { k: COPY.kpi, v: (ctx.n || signals.length) ? (ctx.n || signals.length) + ' 只' : '0 只', s: COPY.sub },
     { k: '待标记', v: uns ? uns + ' 只' : '0 只',
-      s: uns ? '点一下买没买，不点也留档' : '都标过了' },
+      s: uns ? '点一下买没买' : '都标过了' },
     { k: '全部信号', v: (sg.n || 0) + ' 笔',
-      s: sg.n ? '影子收益，衡量规则本身' : '收盘结算后就有' },
+      s: sg.n ? '影子收益，衡量规则本身' : '卖出后就有' },
     { k: '实际买入', v: (rl.n || 0) + ' 笔',
       s: rl.n ? '只算你标记买了的' : '还没有标记过成交' },
     { k: '平均每笔（全部信号）', v: sg.avg == null ? '—' : pct(sg.avg),
@@ -3611,7 +3610,8 @@ function renderOvernight() {
   const marks = d.marks || {}, pa = d.params || {};
   const meta = $('#ovn-meta');
   if (meta) {
-    meta.textContent = `上次生成 ${marks.scan || '还没跑过'}　·　连板 ≥${pa.min_streak}、实体阴线 ≥1%`
+    meta.textContent = `上次扫描 ${marks.scan || '还没跑过'}　·　连板 ≥${pa.min_streak}、实体阴线 ≥1%`
+      + `　·　${pa.buy_at || '14:40'} 买 / 次日 ${pa.sell_at || '14:50'} 卖`
       + `　·　执行率 ${st.exec_rate == null ? '—' : fmt(st.exec_rate, 0) + '%'}`
       + (st.gaps ? `（另有 ${st.gaps} 天开盘价没抓到）` : '')
       + (d.emotion && d.emotion.n
@@ -3619,48 +3619,33 @@ function renderOvernight() {
         : '');
   }
 
-  // ---- 待买：只在"真有待买"或"该说清为什么没有"时显示。
-  // phase=signaled 时下面是「今日信号」，再摆一块空表格纯属占版面。
-  show('#ovn-pending', pend.length > 0 || phase === 'fresh' || phase === 'no_scan');
-  const ph = document.querySelector('#ovn-pending .ph');
-  if (ph) {
-    const b = ph.querySelector('b'), sp = ph.querySelector('.muted');
-    if (b) b.textContent = COPY.title;
-    if (sp) sp.textContent = COPY.note;
-  }
-  $('#tb-ovn-pending').innerHTML = pend.length
-    ? pend.map(x => `<tr>
-        <td class="code">${esc(x.code)}</td>
-        <td class="name">${esc(x.name || '')}</td>
-        <td class="num">${x.streak == null ? '—' : x.streak}${zbcTag(x)}</td>
-        <td>${boardCell(x)}</td>
-        <td class="num">${x.signal_close == null ? '—' : fmt(x.signal_close)}</td>
-        <td class="num ${cls(x.chg)}">${x.chg == null ? '—' : fmt(x.chg, 2) + '%'}</td>
-        <td class="muted">${COPY.how || '9:25 集合竞价挂市价'}</td>
-      </tr>`).join('')
-    : `<tr class="empty"><td colspan="7">${esc(COPY.empty)}</td></tr>`;
-
   // 记录状态：T+1 是硬约束，先把"最早哪天能卖"说清楚，
   // 再提补记时刻（那是执行质量的细节，次要）。
   const capState = x => {
     if (x.deferred) return '跌停卖不掉，顺延 ' + x.deferred + ' 天';
     if (x.flag) return x.flag;
     const sf = String(x.sell_from || '');
-    if (sf) return `T+1 · 最早 ${sf.slice(5)} 卖`;
+    const late = x.late ? `（${x.captured_at || ''}补记）` : '';
+    if (sf) return `T+1 · 最早 ${sf.slice(5)} 尾盘卖${late}`;
     return '已记录';
   };
 
-  // ---- 今日信号：不管买没买都在这儿，买没买由你点
+  // ---- 持仓：14:40 买入、还没卖出的。买没买由你点（软件默认按买了算）
   show('#ovn-open', signals.length > 0);
   if (signals.length) {
     $('#tb-ovn-open').innerHTML = signals.map(x => {
       const ex = x.exec;            // null / true / false
+      const bp = x.buy_price != null ? x.buy_price : x.open;
+      // 当天涨跌：老记录没存 chg，就用「买入价 vs 开盘」现算（14:40 相对开盘的涨跌）
+      const chg = x.chg != null ? x.chg
+        : (bp && x.open ? (bp / x.open - 1) * 100 : null);
       return `<tr data-code="${esc(x.code)}" data-date="${esc(x.buy_date || '')}">
         <td class="code">${esc(x.code)}</td>
         <td class="name">${esc(x.name || '')}</td>
         <td class="num">${x.streak == null ? '—' : x.streak}</td>
-        <td class="num">${x.open == null ? '—' : fmt(x.open)}</td>
-        <td class="num ${cls(x.gap)}">${x.gap == null ? '—' : fmt(x.gap, 2) + '%'}</td>
+        <td>${esc(x.buy_date || '')}</td>
+        <td class="num">${bp == null ? '—' : fmt(bp)}</td>
+        <td class="num ${cls(chg)}">${chg == null ? '—' : fmt(chg, 2) + '%'}</td>
         <td>${execBtns(ex)}</td>
         <td class="muted">${esc(capState(x))}</td>
       </tr>`;
