@@ -140,6 +140,10 @@ function repaintCharts() {
   paintBtCharts();
   paintPfCharts();
   try { paintMemChart(); } catch (_) { }
+  // 主题切换 / 窗口缩放后曲线要按新宽度重画：canvas 是位图，CSS 拉伸会变形
+  try {
+    if (S.ovn && S.ovn.curve && S.ovn.curve.ready) drawOvnCurve($('#ovn-cv'), S.ovn.curve.main);
+  } catch (_) { }
 }
 
 /** 图表还没数据时，别留一块黑 —— 画一句提示（否则二级页看着像"没数据"） */
@@ -3534,6 +3538,190 @@ function overnightCopy(ctx, signals) {
     empty: '今天没有符合条件的票 —— 连板 ≥3 且收实体阴线的，全市场一只都没有' };
 }
 
+/* ---------------------------------------------------------------- 收益率曲线 */
+
+let _ovnPoll = 0, _ovnTries = 0;
+
+/** 隔夜低吸的累计收益率曲线（全市场历史回测）。
+ *
+ *  为什么不复用 drawPtf —— 两处口径不同，直接套会把图画错：
+ *   1. X 轴是**真实日期**。信号日之间可能隔 8 天，也可能连着 3 天；
+ *      按索引等距画，"半个月没票可买"和"天天满仓"长得一模一样。
+ *   2. 阶梯线。收益在**卖出那一刻**才实现，两个结算日之间资金没动。
+ *      画成斜线等于假装持仓期间有浮盈浮亏 —— 那是主策略的画法，不是这条线。
+ */
+function drawOvnCurve(cv, main) {
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 600, H = 260;
+  cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + 'px';
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const C = T();
+
+  const pts = (main && main.curve) || [];
+  if (pts.length < 2) {
+    g.textAlign = 'center';
+    g.fillStyle = C.txt2; g.font = '13px sans-serif';
+    g.fillText('正在回测全市场…', W / 2, H / 2 - 6);
+    g.fillStyle = C.txt3; g.font = '12px sans-serif';
+    g.fillText('约 30 秒，算完自动出现，不用管它', W / 2, H / 2 + 16);
+    return;
+  }
+
+  const dts = pts.map(p => Date.parse(p[0] + 'T00:00:00'));
+  const vals = pts.map(p => +p[1]);
+  const t0 = dts[0];
+  const t1 = dts[dts.length - 1] > t0 ? dts[dts.length - 1] : t0 + 864e5;
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+
+  // 刻度取整到 1/2/5/10/20/25/50，而不是把区间四等分。
+  // 四等分会得到 -24% / -49% / -73% 这种数字，读数的人得在脑子里换算才知道
+  // 自己看到的是哪一档；取整之后一眼就是"跌了两成还是八成"。
+  const spanV = (hi - lo) || 1;
+  const vstep = [1, 2, 5, 10, 20, 25, 50, 100].find(s => spanV / s <= 5) || 100;
+  const ylo = Math.floor(lo / vstep) * vstep;
+  const yhi = Math.ceil(hi / vstep) * vstep;
+
+  // b 留 30 而不是 24：Y 轴最后一个刻度（-100%）和 X 轴第一个日期
+  // 在左下角挨得很近，差 14px 时看着像连成一个字符串。
+  const pad = { l: 48, r: 14, t: 16, b: 30 };
+  const w = W - pad.l - pad.r, h = H - pad.t - pad.b;
+  const X = t => pad.l + w * (t - t0) / (t1 - t0);
+  const Y = v => pad.t + h - h * (v - ylo) / ((yhi - ylo) || 1);
+
+  g.font = '10px monospace'; g.fillStyle = C.txt3; g.textAlign = 'right';
+  for (let v = ylo; v <= yhi + 1e-6; v += vstep) {
+    const y = Y(v);
+    g.strokeStyle = C.line; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(pad.l, y); g.lineTo(pad.l + w, y); g.stroke();
+    g.fillText(v.toFixed(0) + '%', pad.l - 6, y + 3);
+  }
+  // 0% 是"不赚不亏"的基准线，比任何网格线都重要
+  if (lo < 0 && hi >= 0) {
+    g.strokeStyle = C.line2; g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(pad.l, Y(0)); g.lineTo(pad.l + w, Y(0)); g.stroke();
+    g.setLineDash([]);
+  }
+
+  const up = vals[vals.length - 1] >= 0;
+  const col = up ? C.up : C.down;
+
+  // 面积：从 0 基准铺到阶梯线
+  g.beginPath();
+  g.moveTo(X(dts[0]), Y(0));
+  for (let i = 1; i < vals.length; i++) {
+    g.lineTo(X(dts[i]), Y(vals[i - 1]));
+    g.lineTo(X(dts[i]), Y(vals[i]));
+  }
+  g.lineTo(X(t1), Y(0));
+  g.closePath();
+  const grd = g.createLinearGradient(0, pad.t, 0, pad.t + h);
+  grd.addColorStop(0, alpha(col, 0.02));
+  grd.addColorStop(1, alpha(col, 0.26));
+  g.fillStyle = grd; g.fill();
+
+  g.beginPath();
+  g.moveTo(X(dts[0]), Y(vals[0]));
+  for (let i = 1; i < vals.length; i++) {
+    g.lineTo(X(dts[i]), Y(vals[i - 1]));
+    g.lineTo(X(dts[i]), Y(vals[i]));
+  }
+  g.strokeStyle = col; g.lineWidth = 1.6; g.lineJoin = 'round'; g.stroke();
+
+  const li = vals.length - 1;
+  g.beginPath(); g.arc(X(dts[li]), Y(vals[li]), 3, 0, 7); g.fillStyle = col; g.fill();
+  g.textAlign = 'right'; g.font = 'bold 12px monospace'; g.fillStyle = col;
+  g.fillText(vals[li].toFixed(2) + '%',
+    Math.min(X(dts[li]) - 8, W - 8), Math.max(Y(vals[li]) - 9, 13));
+
+  // X 轴：首尾 + 中间两个真实日期。只标首尾的话，看不出"哪一段特别陡"——
+  // 而这条线全段都在跌，陡的那一段恰恰是最该被看见的。
+  g.fillStyle = C.txt3; g.font = '10px monospace';
+  g.textAlign = 'left'; g.fillText(pts[0][0], pad.l, H - 7);
+  g.textAlign = 'right'; g.fillText(pts[li][0], pad.l + w, H - 7);
+  g.textAlign = 'center';
+  [1 / 3, 2 / 3].forEach(f => {
+    const t = t0 + (t1 - t0) * f;
+    let k = 1;
+    for (let i = 2; i < dts.length; i++) if (Math.abs(dts[i] - t) < Math.abs(dts[k] - t)) k = i;
+    const x = X(dts[k]);
+    if (x < pad.l + 44 || x > pad.l + w - 44) return;   // 挤到两端就不标，避免叠字
+    g.fillText(pts[k][0], x, H - 7);
+  });
+}
+
+/** 曲线面板的整体渲染：标题 + 图 + 口径说明 + 忙时轮询。
+    轮询只重画这一块，不动 KPI 和下面的表 —— 否则每 5 秒整页闪一下。 */
+function renderOvnCurve(c) {
+  const cv = $('#ovn-cv'); if (!cv) return;
+  const box = $('#ovn-curve'); if (box) box.hidden = false;
+  const sub = $('#ovn-curve-sub'), note = $('#ovn-curve-note');
+  const cur = c || {};
+  const main = cur.main || null;
+  const kp = (main && main.kpi) || {};
+  const cross = cur.cross || null;
+
+  const pct = v => (v == null ? '—' : (v > 0 ? '+' : '') + fmt(v, 2) + '%');
+  const cls = v => (v == null ? '' : (v > 0 ? 'up' : (v < 0 ? 'down' : '')));
+
+  if (!cur.ready) {
+    if (sub) sub.textContent = cur.building ? '正在回测…' : '还没算过';
+    drawOvnCurve(cv, null);
+    if (note) {
+      note.innerHTML = cur.error
+        ? `回测失败：${esc(cur.error)}　·　下次打开会自动重试`
+        : (cur.building
+          ? '正在跑全市场历史（约 30 秒），算完自动出现，不用刷新。'
+          : '后台还没开始算，等几秒或切换一下页面再来。');
+    }
+    ovnPollIfBusy(cur);
+    return;
+  }
+
+  if (sub) sub.textContent = `${main.first} ~ ${main.last}　·　回测 ${kp.n} 笔　·　满仓复利`;
+  drawOvnCurve(cv, main);
+
+  if (note) {
+    const left = Math.max(100000 * (1 + (kp.total || 0) / 100), 0);
+    let html = `满仓复利累计 <b class="${cls(kp.total)}">${pct(kp.total)}</b>，`
+      + `10 万开始只剩 <b>${money(left)}</b> 元`
+      + `　·　每笔均值 <b class="${cls(kp.avg)}">${pct(kp.avg)}</b>、中位 ${pct(kp.med)}、胜率 ${fmt(kp.win, 1)}%`
+      + `　·　最大回撤 <b class="down">${fmt(kp.mdd, 1)}%</b>`
+      + `　·　${kp.signal_days}/${kp.span} 个交易日有票可买（${fmt(kp.util, 0)}%）`;
+    html += `<br>口径：买入用信号日收盘价、卖出用次日收盘价，代替 14:40 / 14:50 的分钟价；`
+      + `同日多笔等权，按结算日复利。<b>越到后面越平是复利使然</b>`
+      + `（同样的亏损率，本金小了就跌得少），不是亏损在放慢。<b>不是精确回测，更不能当收益承诺。</b>`;
+    if (cross && cross.kpi && cross.kpi.n) {
+      html += `<br>交叉验证（${esc(cross.caliber)}）：${cross.kpi.n} 笔、每笔 `
+        + `<b class="${cls(cross.kpi.avg)}">${pct(cross.kpi.avg)}</b>、`
+        + `累计 ${pct(cross.kpi.total)}，<b>同向</b>。`;
+    }
+    if (cur.stale) html += `　·　数据截止 ${esc(cur.asof)}，正在后台补最新一天`;
+    note.innerHTML = html;
+  }
+  ovnPollIfBusy(cur);
+}
+
+/** 还在算 / 数据过期就每 5 秒问一次，最多 2 分钟。 */
+function ovnPollIfBusy(c) {
+  const busy = !c.ready || c.building || c.stale;
+  clearTimeout(_ovnPoll);
+  if (!busy) { _ovnTries = 0; return; }
+  if (_ovnTries >= 24) return;
+  _ovnPoll = setTimeout(refreshOvnCurve, 5000);
+}
+
+async function refreshOvnCurve() {
+  _ovnTries++;
+  try {
+    const r = await api('/api/overnight/curve');
+    if (S.ovn) S.ovn.curve = r;
+    renderOvnCurve(r);
+  } catch (_) { _ovnTries = 0; }
+}
+
 function renderOvernight() {
   const d = S.ovn;
   const st = (d && d.stats) || {};
@@ -3557,7 +3745,7 @@ function renderOvernight() {
   if (!d) {
     show('#ovn-empty', true);
     show('#ovn-kpis', false);
-    ['#ovn-open', '#ovn-recent'].forEach(s => show(s, false));
+    ['#ovn-open', '#ovn-recent', '#ovn-curve'].forEach(s => show(s, false));
     const m = $('#ovn-meta'); if (m) m.textContent = '读取失败，刷新一下试试';
     return;
   }
@@ -3579,16 +3767,20 @@ function renderOvernight() {
     { k: COPY.kpi, v: (ctx.n || signals.length) ? (ctx.n || signals.length) + ' 只' : '0 只', s: COPY.sub },
     { k: '待标记', v: uns ? uns + ' 只' : '0 只',
       s: uns ? '点一下买没买' : '都标过了' },
-    { k: '全部信号', v: (sg.n || 0) + ' 笔',
-      s: sg.n ? '影子收益，衡量规则本身' : '卖出后就有' },
+    { k: '账本已结算', v: (sg.n || 0) + ' 笔',
+      s: sg.n ? '只算已经卖掉入账的' : '还一笔都没结算' },
     { k: '实际买入', v: (rl.n || 0) + ' 笔',
       s: rl.n ? '只算你标记买了的' : '还没有标记过成交' },
-    { k: '平均每笔（全部信号）', v: sg.avg == null ? '—' : pct(sg.avg),
+    { k: '平均每笔（账本）', v: sg.avg == null ? '—' : pct(sg.avg),
       c: cls(sg.avg),
       s: sg.n ? `胜率 ${fmt(sg.win_rate, 0)}% · 中位 ${pct(sg.med)} · T+1` : '样本还不够' },
-    { k: '盈亏比（全部信号）', v: sg.payoff == null ? '—' : fmt(sg.payoff, 2),
+    { k: '盈亏比（账本）', v: sg.payoff == null ? '—' : fmt(sg.payoff, 2),
       s: sg.payoff == null ? (sg.n ? '还没出现亏损样本' : '样本不够') : '赚的比亏的多多少倍' },
   ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c || ''}">${x.v}</div><div class="s">${x.s || ''}</div></div>`).join('');
+
+  // 收益率曲线：这条线衡量**规则本身**（含没买的信号），和上面的账本无关。
+  // 曲线可能还在后台算，先渲染"正在算"，算完由轮询自己替换。
+  renderOvnCurve(d.curve);
 
   // 板块格子：有板块就说「板块 · 今天同板块几只涨停」，没有就老实说没有。
   // 同板块今天还有票在涨停 = 题材没死，明天低开才有承接 —— 这是"题材核心"的唯一可行代理。

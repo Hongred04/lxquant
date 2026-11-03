@@ -29,7 +29,7 @@ import os
 import time
 from datetime import datetime, timedelta
 
-from . import limitup
+from . import limitup, ovnbt
 from .config import DATA_DIR
 
 # ---------------------------------------------------------------- 参数
@@ -691,6 +691,11 @@ def view() -> dict:
         "emotion": last_emo, "pending_ctx": _pending_ctx(st),
         "marks": st["marks"], "stats": stats(),
         "recent": _read_trades()[-40:][::-1],
+        # 规则本身的历史收益率曲线（全市场回测），和账本完全是两件事：
+        # 这条线算的是"按这套规则做，历史上赚不赚钱"，含没买的信号。
+        # 可能第一次打开时还没算完（要 30 秒），那时 ready=false，
+        # 界面显示"正在算"，后台线程算完写进 data/overnight/curve.json。
+        "curve": ovnbt.view(),
         "params": {"min_streak": MIN_STREAK, "yin_max": YIN_MAX,
                    "buy_at": BUY_AT, "sell_at": SELL_AT,
                    "min_hold_days": MIN_HOLD_DAYS},

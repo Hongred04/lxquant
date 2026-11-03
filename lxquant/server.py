@@ -478,6 +478,13 @@ class Handler(BaseHTTPRequestHandler):
                 from . import overnight
                 return self._json({"ok": True, **overnight.view()})
 
+            if p == "/api/overnight/curve":
+                # 规则本身的历史收益率曲线（全市场回测），和账本是两件事。
+                # 单独一个接口是给前端轮询用的：首次要算 30 秒，页面不能干等，
+                # 所以先渲染已有曲线，再每 5 秒问一次"算完了没"。
+                from . import ovnbt
+                return self._json({"ok": True, **ovnbt.view()})
+
             if p == "/api/overnight/export":
                 # 账本导出成 CSV。要验证"弱板是不是更差"这类假设，必须在表格里分组算，
                 # 界面上点不出结论。

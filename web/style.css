@@ -732,6 +732,14 @@ tr.empty:hover{background:transparent!important}
 /* 画布别被拉高：canvas 的 height 属性只给后备尺寸，真正的高度由 JS 设成 220px；
    原来漏了 height 约束，整张图会被拉到和右边卡片一样高（730px），看着像"一块空面板" */
 .cv{width:100%;height:220px;display:block;padding:8px;background:var(--chart-bg);flex:0 0 auto}
+/* 曲线下面的口径说明。把"满仓复利""收盘价近似"这些容易被误读的地方写清楚 ——
+   不写的话，-97% 这种数字会被当成"软件算错了"。字号比正文小一档，它不是重点，
+   但少了它就是误导。 */
+.cnote{padding:2px 13px 11px;font-size:11.5px;line-height:1.75;color:var(--txt-3)}
+.cnote b{color:var(--txt-2);font-weight:500}
+.cnote .up{color:var(--up)}
+.cnote .down{color:var(--down)}
+.cnote .lnk{margin-left:4px}
 .reason-box{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .rs{display:flex;align-items:center;gap:8px;font-size:12px}
 .rs span{width:112px;flex:none;color:var(--txt-2);line-height:1.5}
