@@ -137,9 +137,11 @@ function repaintCharts() {
     drawChip($('#chip-cv'), S.detail);
     drawKline($('#k-cv'), S.detail, tab ? tab.dataset.per : 'day');
   }
-  paintBtCharts();
-  paintPfCharts();
   try { paintMemChart(); } catch (_) { }
+  // 收益曲线切主题 / 改窗口大小也要重画：canvas 是位图，CSS 拉伸会变形
+  try {
+    if (S.equity && S.equity.curve && S.equity.curve.length) drawEquity($('#cv-chart'), S.equity);
+  } catch (_) { }
 }
 
 /** 图表还没数据时，别留一块黑 —— 画一句提示（否则二级页看着像"没数据"） */
@@ -156,18 +158,6 @@ function drawHint(cv, title, sub) {
   g.fillText(title, W / 2, H / 2 - 6);
   g.fillStyle = T().txt3; g.font = '12px sans-serif';
   g.fillText(sub, W / 2, H / 2 + 16);
-}
-
-function paintBtCharts() {
-  // 信号检验这一页不再画资金曲线：钱的事统一归「模拟账户」，
-  // 免得同一个账户在两页里出现两个差 9 倍的「赚了多少」。
-  if (S.bt && S.bt.summary) renderBtDist();
-}
-
-function paintPfCharts() {
-  const cv = $('#pf-chart'); if (!cv) return;
-  if (S.pf && S.pf.curve && S.pf.curve.length) drawPtf(cv, S.pf.curve);
-  else drawHint(cv, '还没模拟过', '点上面的「模拟一遍」，看看钱一年能变成多少');
 }
 
 function initTheme() {
@@ -189,9 +179,7 @@ const S = {
   sort: { key: 'score', dir: -1 },
   filter: '',
   scanItems: [],
-  bt: null,
-  btResult: null,
-  pf: null,
+  equity: null,        // 收益曲线：模拟账户跑一遍的结果（后端缓存在 data/equity.json）
   detail: null,
   busy: {},
   /* 「值得盯着」弹窗（S.watchModalOpen）和它的筛选（S.watchFilter：all / near） */
@@ -208,11 +196,11 @@ const S = {
 };
 
 /* ------------------------------------------------ 视图切换 */
-const TITLES = { screen: '选股', watch: '盯盘 / 自选', memory: '记忆', backtest: '信号检验', portfolio: '模拟账户', method: '使用说明', settings: '参数设置' };
+const TITLES = { screen: '选股', watch: '盯盘 / 自选', curve: '收益曲线', memory: '记忆', method: '使用说明', settings: '参数设置' };
 /* 二级页层数：0 = 主页面（侧栏常驻、整块内容一起滚）；
    1 = 从主页面钻进去的工具页（信号检验 / 模拟账户 / 使用说明 / 参数设置），
        顶部只留一条面包屑 + 吸顶的工具条，别让人迷失在长表格里 */
-const LEVEL = { screen: 0, watch: 0, memory: 1, backtest: 1, portfolio: 1, method: 1, settings: 1 };
+const LEVEL = { screen: 0, watch: 0, curve: 1, memory: 1, method: 1, settings: 1 };
 const REHOME = Object.keys(LEVEL).filter(v => LEVEL[v] === 0);   // 操作台：用 app-main 把二级页的头部还回去
 // 顶栏副标题：默认留空。以前每页都挂一句「这页是干什么的」，
 // 但页面标题（选股 / 自选 / 记忆 / 信号检验…）本身已经说清了，
@@ -289,8 +277,7 @@ function switchView(v) {
     try { loadWatchlist(); } catch (_) { }
   }
   // 图表页切过来时画布刚有宽度，得重画一次（藏着的 canvas 宽度是 0，画了也是空）
-  if (v === 'backtest') { try { paintBtCharts(); renderBtEmpty(); } catch (_) { } }
-  if (v === 'portfolio') { try { paintPfCharts(); renderPfEmpty(); } catch (_) { } }
+  if (v === 'curve') { try { loadEquity(); } catch (_) { } }
   if (v === 'memory') { try { loadMemory(); } catch (_) { } }
 }
 
@@ -1764,209 +1751,6 @@ function rc(k) {
   return /^跌破MA\d+$/.test(s) ? '跌破 ' + s.slice(5) + ' 日均线' : (REASON_CN[s] || s);
 }
 
-/** 检验范围：market=全市场抽样（默认） / today=只看今天的名单 */
-function btScope() { const el = $('#bt-scope'); return el ? el.value : 'market'; }
-function pfScope() { const el = $('#pf-scope'); return el ? el.value : 'market'; }
-
-async function runBacktest() {
-  if (S.busy.bt) return;
-  S.busy.bt = true;
-  const btn = $('#btn-bt');
-  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>正在检验…';
-  $('#bt-prog').hidden = false;
-  try {
-    const j = await api('/api/backtest', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        limit: +$('#bt-limit').value, mode: 'balanced',
-        lookback: +$('#bt-lookback').value,
-        // 默认全市场抽样：以前这里绑死"今天的名单"，今天只选出 2 只就只回测 2 只，
-        // 几笔交易当然看不出任何结论（这是"信号检验没数据"最直接的原因）。
-        codes: btScope() === 'today' && S.items.length
-          ? S.items.slice(0, +$('#bt-limit').value).map(a => a.code) : null,
-      }),
-    });
-    await pollJob(j.job.id, $('#bt-msg'), $('#bt-pct'), $('#bt-bar'));
-    const r = await api('/api/job/result?id=' + encodeURIComponent(j.job.id));
-    if (r.state !== 'done') throw new Error(r.error || '任务未完成');
-    S.bt = r.result;
-    renderBacktest();
-    toast(`检验完成，一共 ${r.result.summary.count} 笔`);
-  } catch (e) { toast('检验失败：' + e.message, true); }
-  finally {
-    S.busy.bt = false;
-    btn.disabled = false; btn.innerHTML = '<i data-ic="play"></i>开始检验'; paintIcons(btn);
-    setTimeout(() => { $('#bt-prog').hidden = true; }, 700);
-  }
-}
-
-/** 没跑过时，把结果区（KPI、图表、卡片、明细表）换成一句说明，别留一片黑 */
-function renderBtEmpty() {
-  const has = !!(S.bt && S.bt.summary);
-  const box = $('#bt-empty'); if (box) box.hidden = has;
-  const more = $('#bt-more'); if (more) more.hidden = !has;   // 没跑过就别摆「在整屏里看」
-  ['#bt-verdict', '#bt-kpis', '#view-backtest .row2', '#bt-table'].forEach(sel => {
-    const el = document.querySelector(sel);
-    if (el) el.hidden = !has;
-  });
-  paintBtCharts();
-}
-
-function renderPfEmpty() {
-  const has = !!(S.pf && S.pf.summary);
-  const box = $('#pf-empty'); if (box) box.hidden = has;
-  const more = $('#pf-more'); if (more) more.hidden = !has;   // 没模拟过就别摆「在整屏里看」
-  ['#pf-kpis', '#view-portfolio .row2', '#pf-table'].forEach(sel => {
-    const el = document.querySelector(sel);
-    if (el) el.hidden = !has;
-  });
-  paintPfCharts();
-}
-
-/* 准入结论卡：这套规则够不够格当默认策略。
- *
- * 为什么单独一张卡、而且放在 KPI 上面：
- *   用户真正想知道的是"能不能用"，一堆指标只是证据。先给结论再给证据，
- *   比让人从六个 KPI 里自己推要快得多。
- *
- * 判定逻辑在 lxquant/verdict.py（纯函数、有单测），前端只负责画 ——
- * 门槛写在一处，改标准不用前后端各改一遍。
- */
-function renderBtVerdict(v) {
-  const box = $('#bt-verdict');
-  if (!box) return;
-  // 旧结果没有这个字段，或者后端算挂了：不要空着一张卡，直接藏起来
-  if (!v || !v.level) { box.hidden = true; box.innerHTML = ''; return; }
-  const icon = { pass: '✓', watch: '!', fail: '✗', insufficient: '?' }[v.level] || '·';
-  const chips = (v.checks || []).map(c => {
-    const val = (c.value === null || c.value === undefined) ? '—' : c.value;
-    // 三态：ok 达标 / watch 在容忍范围内（标黄）/ no 真不行。
-    // 只有两种颜色的话，"watch 档下面一片红叉"会让人觉得结论自相矛盾。
-    const lv = c.level || (c.ok ? 'ok' : 'no');
-    const mark = { ok: '✓', watch: '!', no: '✗' }[lv] || '·';
-    return `<span class="vc ${lv}" title="${esc(c.text || '')} · 门槛 ${esc(c.need || '')}">
-      <i>${mark}</i>${esc(c.label)}<b>${esc(val)}</b></span>`;
-  }).join('');
-  box.className = 'verdict v-' + v.level;
-  box.hidden = false;
-  box.innerHTML = `
-    <div class="v-hd"><span class="v-ic">${icon}</span><b>${esc(v.label || '')}</b></div>
-    <p class="v-note">${esc(v.note || '')}</p>
-    <div class="v-chips">${chips}</div>`;
-}
-
-function renderBacktest() {
-  const r = S.bt; if (!r) return;
-  renderBtEmpty();
-  renderBtVerdict(r.verdict);
-  const s = r.summary;
-  const kb = $('#bt-kpis');
-  kb.innerHTML = [
-    { k: '一共几笔', v: s.count, s: s.open ? `已卖掉 ${s.closed} 笔 · 还有 ${s.open} 笔没到卖出条件` : `全部卖掉后结算 ${s.closed} 笔`, c: '' },
-    // 成本单独摆一格：先看毛利够不够付手续费和滑点，再看净收益才有意义
-    { k: '扣成本前', v: (s.gross_ret > 0 ? '+' : '') + pct(s.gross_ret), s: `每笔来回成本约 ${(s.avg_cost || 0).toFixed(2)}%`, c: s.gross_ret > 0 ? 'up' : 'down' },
-    { k: '扣成本后', v: (s.avg_ret > 0 ? '+' : '') + pct(s.avg_ret), s: s.gross_ret > 0 && s.avg_ret <= 0 ? '毛利被手续费吃光了' : `中间那个数 ${pct(s.med_ret)}`, c: s.avg_ret > 0 ? 'up' : 'down' },
-    { k: '多少笔赚钱', v: pct(s.win_rate, 1), s: `不亏本至少要 ${pct(s.breakeven_wr || 0, 1)}`, c: s.win_rate >= (s.breakeven_wr || 50) ? 'up' : 'down' },
-    { k: '亏小赚大', v: (s.payoff || 0).toFixed(2) + ' 倍', s: `赢的每笔平均 +${pct(s.avg_win)}，输的 ${pct(s.avg_loss)}`, c: s.payoff >= 1 ? 'up' : 'down' },
-    // 稳健分：0.6×中位折 + 0.4×最差折（tick-stock-panel 的做法）。
-    // 样本均值会被一笔幸运单拉高，看折间表现才说明不同环境下站不站得住。
-    { k: '稳健分',
-      v: s.robust == null ? '—' : (s.robust > 0 ? '+' : '') + pct(s.robust),
-      s: s.robust == null ? (s.warn || '交易数不足 5 折')
-        : `中位折 ${pct(s.median)} · 最差折 ${pct(s.worst)}${s.warn ? ' · ' + s.warn : ''}`,
-      c: s.robust > 0 ? 'up' : 'down' },
-    { k: '平均拿几天', v: s.avg_hold + '天', s: `赚最多一笔 +${pct(s.max_win)}，亏最多 ${pct(s.max_loss)}`, c: 'warn' },
-  ].map(x => `<div class="kpi ${x.c}"><div class="k">${x.k}</div><div class="v">${x.v}</div><div class="s">${x.s}</div></div>`).join('');
-
-  renderBtDist();
-
-  const rs = Object.entries(s.reasons || {});
-  const maxr = Math.max(1, ...rs.map(x => x[1]));
-  const totalr = rs.reduce((a, b) => a + b[1], 0) || 1;
-  // 按笔数从多到少排：后端 dict 的顺序是「首次出现」，不排会出现 11 笔排在 15 笔前面
-  rs.sort((a, b) => b[1] - a[1]);
-  $('#reason-box').innerHTML = rs.length ? rs.map(([k, v]) => `
-    <div class="rs"><span>${esc(rc(k))}</span><div class="rbar"><i style="width:${v / maxr * 100}%"></i></div><b>${v}</b></div>`).join('')
-    + `<div class="hintline">一共 ${totalr} 笔卖掉了。「从高点回落」占比最高是正常的 —— 这套规则本来就靠跟着趋势走；如果「跌到止损价」一大片，说明信号本身质量不够，别急着上手。</div>`
-    : '<div class="muted">还没有交易记录</div>';
-
-  const tb = $('#tb-bt');
-  const rows = r.trades || [];
-  const cov = r.coverage || {};
-  const covTxt = cov.from
-    ? ` · 实际检验 ${cov.from} ~ ${cov.to}（${cov.days} 个交易日；最前面约 120 个交易日用于筹码预热，不参与检验）`
-    : '';
-  $('#bt-meta').textContent = `看了 ${r.scanned} 只 · 用时 ${r.elapsed}s${covTxt} · ${r.note}`;
-  tb.innerHTML = rows.length ? rows.map(t => `<tr data-code="${t.code}">
-    <td class="code">${t.signal_date}</td><td>${t.buy_date}</td><td class="num">${fmt(t.buy)}</td>
-    <td>${t.sell_date}</td><td class="num">${fmt(t.sell)}</td><td class="num">${t.hold}</td>
-    <td class="num ${cls(t.ret)}">${t.ret > 0 ? '+' : ''}${fmt(t.ret)}%</td>
-    <td class="num muted2">${t.gross != null ? (t.gross > 0 ? '+' : '') + fmt(t.gross) + '%' : '-'}</td>
-    <td>${esc(rc(t.reason))}</td><td class="num">${fmt(t.profit_ratio, 1)}</td><td class="num">${fmt(t.pos, 1)}</td>
-  </tr>`).join('') : '<tr class="empty"><td colspan="11">没有产生交易</td></tr>';
-}
-
-/* 单笔收益分布：按 -10% 以下 / -10~-5 / -5~0 / 0~5 / 5~10 / 10% 以上 六堆数一下。
-   这一页不画资金曲线，改看「赢的赚多少、输的亏多少」，才是信号本身的质量。 */
-function renderBtDist() {
-  const box = $('#bt-dist'); if (!box) return;
-  const r = S.bt; if (!r) return;
-  const rows = (r.trades || []).filter(t => !t.open);
-  if (!rows.length) { box.innerHTML = '<div class="muted">还没有卖掉的交易</div>'; return; }
-  const bins = [
-    ['亏 10% 以上', t => t.ret <= -10, 'down'],
-    ['亏 5~10%', t => t.ret > -10 && t.ret <= -5, 'down'],
-    ['亏 5% 以内', t => t.ret > -5 && t.ret < 0, 'down'],
-    ['赚 5% 以内', t => t.ret >= 0 && t.ret < 5, 'up'],
-    ['赚 5~10%', t => t.ret >= 5 && t.ret < 10, 'up'],
-    ['赚 10% 以上', t => t.ret >= 10, 'up'],
-  ].map(([k, f, c]) => [k, rows.filter(f).length, c]);
-  const mx = Math.max(1, ...bins.map(b => b[1]));
-  box.innerHTML = bins.map(([k, v, c]) => `
-    <div class="rs"><span>${k}</span><div class="rbar"><i class="${c}" style="width:${v / mx * 100}%"></i></div><b>${v}</b></div>`).join('')
-    + `<div class="hintline">赚的和亏的两头都得有：全是「赚 5% 以内」说明止盈太早、拿不住；「亏 10% 以上」冒头说明止损被跳空穿透了。</div>`;
-}
-
-/* ================================================================ 模拟账户
-   参考 QUANTAXIS 的 QIFI 账户思路：策略只负责产出「信号」，
-   账户负责判断现金够不够、持仓满没满、扣多少手续费。
-   这才是真实收益——逐笔复利曲线会高估，因为它假设每笔都能拿满全部资金。 */
-async function runPortfolio() {
-  if (S.busy.pf) return;
-  S.busy.pf = true;
-  const btn = $('#btn-pf');
-  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>正在模拟…';
-  $('#pf-prog').hidden = false;
-  try {
-    const lim = +$('#pf-limit').value;
-    const j = await api('/api/portfolio', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        limit: lim, mode: 'balanced', lookback: +$('#pf-lookback').value,
-        // 同信号检验：默认全市场抽样，不要绑死当天的名单
-        codes: pfScope() === 'today' && S.items.length
-          ? S.items.slice(0, lim).map(a => a.code) : null,
-        initial_cash: +$('#pf-cash').value,
-        max_pos: +$('#pf-maxpos').value,
-        pos_pct: +$('#pf-pospct').value,
-        slippage: +$('#pf-slip').value,
-        commission: 0.00025, stamp: 0.001,
-      }),
-    });
-    await pollJob(j.job.id, $('#pf-msg'), $('#pf-pct'), $('#pf-bar'));
-    const r = await api('/api/job/result?id=' + encodeURIComponent(j.job.id));
-    if (r.state !== 'done') throw new Error(r.error || '任务未完成');
-    S.pf = r.result;
-    renderPortfolio();
-    toast(`模拟完成，一共成交 ${r.result.summary.trades} 笔`);
-  } catch (e) { toast('模拟失败：' + e.message, true); }
-  finally {
-    S.busy.pf = false;
-    btn.disabled = false; btn.innerHTML = '<i data-ic="play"></i>模拟一遍'; paintIcons(btn);
-    setTimeout(() => { $('#pf-prog').hidden = true; }, 700);
-  }
-}
-
 function money(v) {
   const a = Math.abs(v);
   if (a >= 1e8) return (v / 1e8).toFixed(2) + '亿';
@@ -1974,86 +1758,60 @@ function money(v) {
   return v.toFixed(0);
 }
 
-function renderPortfolio() {
-  const r = S.pf; if (!r) return;
-  renderPfEmpty();
-  const s = r.summary || {};
-  $('#pf-kpis').innerHTML = [
-    { k: '总共赚了', v: (s.total_ret > 0 ? '+' : '') + pct(s.total_ret), s: `最后剩下 ${money(s.final_equity)} 元`, c: s.total_ret > 0 ? 'up' : 'down' },
-    { k: '折成一年', v: (s.annual > 0 ? '+' : '') + pct(s.annual), s: `一共 ${s.days} 个交易日`, c: s.annual > 0 ? 'up' : 'down' },
-    { k: '最难受的时候', v: pct(s.mdd), s: `相对风险的性价比 ${s.calmar}`, c: 'down' },
-    { k: '收益波动性价比', v: String(s.sharpe), s: s.sharpe >= 1 ? '不错' : s.sharpe >= 0.5 ? '一般' : '偏低', c: s.sharpe >= 1 ? 'up' : 'warn' },
-    { k: '多少笔赚钱', v: pct(s.win_rate, 1), s: `赚的比亏的多 ${s.profit_factor} 倍`, c: s.win_rate >= 50 ? 'up' : 'down' },
-    { k: '成交笔数', v: s.trades, s: `因为没钱/满仓跳过 ${s.skipped} 次`, c: 'warn' },
-  ].map(x => `<div class="kpi ${x.c}"><div class="k">${x.k}</div><div class="v">${x.v}</div><div class="s">${x.s}</div></div>`).join('');
-
-  drawPtf($('#pf-chart'), r.curve);
-
-  // 成本与资金占用
-  const fees = (r.trades || []).reduce((a, t) => a + (t.fee || 0), 0);
-  const util = s.util || 0;
-  $('#pf-cost').innerHTML = `
-    <div class="rs"><span>钱真正在用的时候</span><div class="rbar"><i style="width:${Math.min(100, util).toFixed(2)}%"></i></div><b>${util}%</b></div>
-    <div class="rs"><span>手续费一共交了</span><div class="rbar"><i style="width:${Math.min(100, fees / Math.max(1, s.initial_cash) * 100 * 20).toFixed(2)}%"></i></div><b>${money(fees)}</b></div>
-    <div class="pf-notes">
-      <div><b>${s.taken}</b> 个信号真的买进了，<b>${s.skipped}</b> 个因为满仓 / 钱不够被跳过</div>
-      <div>平均每笔拿 <b>${s.avg_hold}</b> 个交易日</div>
-      <div class="hintline">「钱真正在用的时候」太低，说明信号太少、钱大部分时间躺着。要么放宽条件，要么减少同时持有的只数。</div>
-    </div>`;
-
-  const tr = r.trades || [];
-  const cov = r.coverage || {};
-  const covTxt = cov.from ? ` · 覆盖 ${cov.from} ~ ${cov.to}（${cov.days} 个交易日，明细表按时间倒序，往下滚就是早年）` : '';
-  $('#pf-meta').textContent = `看了 ${r.scanned} 只 · 能买的信号 ${r.candidates} 个 · 用时 ${r.elapsed}s${covTxt}`;
-  $('#tb-pf').innerHTML = tr.length ? tr.map(t => `<tr data-code="${t.code}">
-    <td class="code">${t.code}</td><td>${esc(t.name || '')}</td>
-    <td>${t.buy_date}</td><td>${t.sell_date}</td>
-    <td class="num">${t.shares}</td>
-    <td class="num">${money(t.buy_amt)}</td><td class="num">${money(t.sell_amt)}</td>
-    <td class="num">${fmt(t.fee, 0)}</td>
-    <td class="num ${cls(t.pnl)}">${t.pnl > 0 ? '+' : ''}${fmt(t.pnl, 0)}</td>
-    <td class="num ${cls(t.ret_net)}">${t.ret_net > 0 ? '+' : ''}${fmt(t.ret_net)}%</td>
-    <td>${esc(rc(t.reason || ''))}</td>
-  </tr>`).join('') : '<tr class="empty"><td colspan="11">没有产生成交</td></tr>';
-}
-
-function drawPtf(cv, curve) {
-  // curve 是相对初始资金的百分比 [[date, pct], ...]，与资金曲线同口径
+/** 资金曲线 —— 收益曲线页的主角。
+ *
+ *  X 轴用**等距索引**而不是真实日期：portfolio 的 curve 是"每个交易日一个点"，
+ *  等距就是等时间，再算一遍日期差只是多一层可能出错的计算。
+ *  Y 轴刻度取整到 1/2/5/10/20/25/50：四等分会得到 -24% / -49% 这种
+ *  读数之前得先在心里换算的数字。
+ */
+function drawEquity(cv, data) {
   if (!cv) return;
+  const curve = (data && data.curve) || [];
   const dpr = window.devicePixelRatio || 1;
-  const W = cv.clientWidth || 600, H = 220;
+  const W = cv.clientWidth || 720, H = 320;
   cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + 'px';
   const g = cv.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
-  if (!curve || curve.length < 2) {
-    g.fillStyle = T().txt3; g.font = '12px sans-serif'; g.textAlign = 'center';
+  const C = T();
+
+  if (curve.length < 2) {
+    g.fillStyle = C.txt3; g.font = '12px sans-serif'; g.textAlign = 'center';
     g.fillText('还没有数据', W / 2, H / 2); return;
   }
-  const pts = curve.map(p => p[1]);
-  const mn = Math.min(0, ...pts), mx = Math.max(0, ...pts);
-  const span = (mx - mn) || 1;
-  const pad = { l: 46, r: 12, t: 12, b: 20 };
+
+  const pts = curve.map(p => +p[1]);
+  const lo = Math.min(0, ...pts), hi = Math.max(0, ...pts);
+  const spanV = (hi - lo) || 1;
+  const vstep = [1, 2, 5, 10, 20, 25, 50, 100].find(s => spanV / s <= 5) || 100;
+  const ylo = Math.floor(lo / vstep) * vstep;
+  const yhi = Math.ceil(hi / vstep) * vstep;
+  const pad = { l: 50, r: 16, t: 14, b: 26 };
   const w = W - pad.l - pad.r, h = H - pad.t - pad.b;
   const X = i => pad.l + (w * i) / (curve.length - 1);
-  const Y = v => pad.t + h - (h * (v - mn)) / span;
+  const Y = v => pad.t + h - h * (v - ylo) / ((yhi - ylo) || 1);
 
-  g.strokeStyle = T().line; g.lineWidth = 1;
-  g.font = '10px monospace'; g.fillStyle = T().txt3; g.textAlign = 'right';
-  for (let i = 0; i <= 4; i++) {
-    const v = mn + span * i / 4, y = Y(v);
+  g.font = '10px monospace'; g.fillStyle = C.txt3; g.textAlign = 'right';
+  for (let v = ylo; v <= yhi + 1e-6; v += vstep) {
+    const y = Y(v);
+    g.strokeStyle = C.line; g.lineWidth = 1;
     g.beginPath(); g.moveTo(pad.l, y); g.lineTo(pad.l + w, y); g.stroke();
-    g.fillText(v.toFixed(1) + '%', pad.l - 6, y + 3);
+    g.fillText(v.toFixed(0) + '%', pad.l - 6, y + 3);
   }
-  g.strokeStyle = T().line2; g.setLineDash([3, 3]);
-  g.beginPath(); g.moveTo(pad.l, Y(0)); g.lineTo(pad.l + w, Y(0)); g.stroke();
-  g.setLineDash([]);
+  // 0% = 本金线。比任何网格都重要：亏了还是赚了，看这一条就够
+  if (ylo < 0 && yhi >= 0) {
+    g.strokeStyle = C.line2; g.setLineDash([3, 3]);
+    g.beginPath(); g.moveTo(pad.l, Y(0)); g.lineTo(pad.l + w, Y(0)); g.stroke();
+    g.setLineDash([]);
+  }
 
   const up = pts[pts.length - 1] >= 0;
-  const col = up ? T().up : T().down;
+  const col = up ? C.up : C.down;
   const grd = g.createLinearGradient(0, pad.t, 0, pad.t + h);
-  grd.addColorStop(0, alpha(col, 0.24));
+  grd.addColorStop(0, alpha(col, 0.26));
   grd.addColorStop(1, alpha(col, 0.01));
+
   g.beginPath(); g.moveTo(X(0), Y(0));
   curve.forEach((p, i) => g.lineTo(X(i), Y(p[1])));
   g.lineTo(X(curve.length - 1), Y(0)); g.closePath();
@@ -2063,16 +1821,151 @@ function drawPtf(cv, curve) {
   curve.forEach((p, i) => i ? g.lineTo(X(i), Y(p[1])) : g.moveTo(X(i), Y(p[1])));
   g.strokeStyle = col; g.lineWidth = 1.8; g.lineJoin = 'round'; g.stroke();
 
+  // 终点：一个点 + 一个数。打开这一页第一眼想知道的就这一个数字
   const li = curve.length - 1;
-  g.beginPath(); g.arc(X(li), Y(pts[li]), 3, 0, 7); g.fillStyle = col; g.fill();
-  g.textAlign = 'left'; g.font = '11px monospace'; g.fillStyle = col;
-  g.fillText(pts[li].toFixed(2) + '%', Math.min(X(li) - 46, W - 62), Y(pts[li]) - 8);
+  g.beginPath(); g.arc(X(li), Y(pts[li]), 3.5, 0, 7); g.fillStyle = col; g.fill();
+  g.textAlign = 'right'; g.font = 'bold 12px monospace'; g.fillStyle = col;
+  g.fillText(pts[li].toFixed(2) + '%',
+    Math.min(X(li) - 8, W - 8), Math.max(Y(pts[li]) - 10, 14));
 
-  g.fillStyle = T().txt3; g.font = '10px monospace';
-  g.textAlign = 'left'; g.fillText(curve[0][0], pad.l, H - 5);
-  g.textAlign = 'right'; g.fillText(curve[li][0], pad.l + w, H - 5);
+  // X 轴：首尾 + 中间两个。只标首尾的话看不出"这段到底拖了多久"
+  g.fillStyle = C.txt3; g.font = '10px monospace';
+  g.textAlign = 'left'; g.fillText(curve[0][0], pad.l, H - 7);
+  g.textAlign = 'right'; g.fillText(curve[li][0], pad.l + w, H - 7);
+  g.textAlign = 'center';
+  [1 / 3, 2 / 3].forEach(f => {
+    const k = Math.round((curve.length - 1) * f);
+    const x = X(k);
+    if (x < pad.l + 44 || x > pad.l + w - 44) return;
+    g.fillText(curve[k][0], x, H - 7);
+  });
 }
 
+/* ---------------------------------------------------------------- 收益曲线 */
+
+/** 打开就先读缓存：后端跑一次十几秒，不该每次进来都对着进度条等。 */
+async function loadEquity() {
+  try { S.equity = await api('/api/equity'); } catch (_) { S.equity = null; }
+  renderEquity();
+}
+
+/** 跑一遍。参数只留三个 —— 原来那页有七个下拉框，实际没人会去调第二个。 */
+async function runEquity() {
+  if (S.busy.equity) return;
+  S.busy.equity = true;
+  const btn = $('#btn-cv'), prog = $('#cv-prog');
+  const old = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>正在跑…'; }
+  if (prog) prog.hidden = false;
+  try {
+    const j = await api('/api/equity', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        initial_cash: +$('#cv-cash').value,
+        max_pos: +$('#cv-maxpos').value,
+        lookback: +$('#cv-lookback').value,
+      }),
+    });
+    await pollJob(j.job.id, $('#cv-msg'), $('#cv-pct'), $('#cv-bar'));
+    const r = await api('/api/job/result?id=' + encodeURIComponent(j.job.id));
+    if (r.state !== 'done') throw new Error(r.error || '任务没跑完');
+    // 后端跑完会写缓存，这里重读一次 —— 少了这一步，界面和后端就成了两处口径
+    await loadEquity();
+    toast(`跑完了，一共成交 ${((r.result || {}).summary || {}).trades || 0} 笔`);
+  } catch (e) {
+    toast('没跑成：' + (e && e.message ? e.message : e), true);
+  } finally {
+    S.busy.equity = false;
+    if (btn) { btn.disabled = false; btn.innerHTML = old; paintIcons(btn); }
+    setTimeout(() => { if (prog) prog.hidden = true; }, 700);
+  }
+}
+
+function renderEquity() {
+  const d = S.equity;
+  const show = (sel, on) => { const el = $(sel); if (el) el.hidden = !on; };
+  const btn = $('#btn-cv');
+  if (btn && !btn.onclick) btn.onclick = runEquity;
+
+  if (!d || !d.ready) {
+    const kp = $('#cv-kpis'); if (kp) kp.innerHTML = '';
+    show('#cv-empty', true); show('#cv-wrap', false); show('#cv-detail', false);
+    return;
+  }
+  show('#cv-empty', false); show('#cv-wrap', true); show('#cv-detail', true);
+
+  // 参数回填：缓存里存的是**上次实际用的条件**，界面不能显示成默认值 ——
+  // 否则用户看到"100 万 / 5 只"，图却是按 30 万跑出来的。
+  const p = d.params || {}, def = d.defaults || {};
+  const setSel = (sel, v) => {
+    const el = $(sel);
+    if (el && v != null && String(el.value) !== String(v)) el.value = String(v);
+  };
+  setSel('#cv-cash', p.initial_cash || def.initial_cash);
+  setSel('#cv-maxpos', p.max_pos || def.max_pos);
+  setSel('#cv-lookback', p.lookback || def.lookback);
+
+  const s = d.summary || {};
+  const dir = v => (v > 0 ? 'up' : 'down');
+  $('#cv-kpis').innerHTML = [
+    { k: '总共赚了', v: (s.total_ret > 0 ? '+' : '') + pct(s.total_ret),
+      s: `最后剩下 ${money(s.final_equity)}元`, c: dir(s.total_ret) },
+    { k: '折成一年', v: (s.annual > 0 ? '+' : '') + pct(s.annual),
+      s: `一共 ${s.days} 个交易日`, c: dir(s.annual) },
+    { k: '最难受的时候', v: pct(s.mdd), s: `相对风险的性价比 ${s.calmar}`, c: 'down' },
+    { k: '收益波动性价比', v: String(s.sharpe),
+      s: s.sharpe >= 1 ? '不错' : s.sharpe >= 0.5 ? '一般' : '偏低',
+      c: s.sharpe >= 1 ? 'up' : 'warn' },
+    { k: '多少笔赚钱', v: pct(s.win_rate, 1),
+      s: `赚的比亏的多 ${s.profit_factor} 倍`, c: s.win_rate >= 50 ? 'up' : 'down' },
+    { k: '成交笔数', v: s.trades, s: `因为没钱 / 满仓跳过 ${s.skipped} 次`, c: 'warn' },
+  ].map(x => `<div class="kpi ${x.c}"><div class="k">${x.k}</div><div class="v">${x.v}</div><div class="s">${x.s}</div></div>`).join('');
+
+  drawEquity($('#cv-chart'), d);
+
+  const cov = d.coverage || {};
+  const sub = $('#cv-sub');
+  if (sub) {
+    sub.textContent = cov.from
+      ? `${cov.from} ~ ${cov.to}　·　${cov.days} 个交易日　·　本金 ${money(s.initial_cash)}`
+      : `本金 ${money(s.initial_cash)}`;
+  }
+
+  const note = $('#cv-note');
+  if (note) {
+    let html = `现金 + 持仓市值的逐日盯市，已扣佣金（万 2.5，最低 5 元）、`
+      + `印花税（千 1，仅卖出）和滑点（每边 0.1%）。`
+      + `　·　最多同时持 ${s.max_pos} 只、每只最多用 ${s.pos_pct}% 的钱。`;
+    // 资金利用率低的时候曲线会长时间贴着 0% —— 那不是没数据，是没票可买。
+    // 不解释一句，看图的人会以为中间那段坏了。
+    if (s.util != null && s.util < 40) {
+      html += `　·　<b>钱真正在用的时间只有 ${s.util}%</b>，`
+        + `曲线平着的那几段就是空仓，不是没数据。`;
+    }
+    if (d.stale) {
+      html += `<br><b>曲线只到 ${esc(d.asof)}，之后行情又走了几天</b> —— 点「跑一遍」用最新数据重算。`;
+    }
+    if (d.built_at) html += `<br>上次算：${esc(d.built_at)}`;
+    note.innerHTML = html;
+  }
+
+  const tr = d.trades || [];
+  const meta = $('#cv-meta');
+  if (meta) meta.textContent = tr.length ? `最近 ${tr.length} 笔，按时间倒序` : '';
+  const tb = $('#tb-cv');
+  if (tb) {
+    tb.innerHTML = tr.length ? tr.map(t => `<tr data-code="${esc(t.code)}">
+      <td class="code">${esc(t.code)}</td><td>${esc(t.name || '')}</td>
+      <td>${esc(t.buy_date || '')}</td><td>${esc(t.sell_date || '')}</td>
+      <td class="num">${t.shares}</td>
+      <td class="num">${money(t.buy_amt)}</td><td class="num">${money(t.sell_amt)}</td>
+      <td class="num">${fmt(t.fee, 0)}</td>
+      <td class="num ${cls(t.pnl)}">${t.pnl > 0 ? '+' : ''}${fmt(t.pnl, 0)}</td>
+      <td class="num ${cls(t.ret_net)}">${t.ret_net > 0 ? '+' : ''}${fmt(t.ret_net)}%</td>
+      <td>${esc(rc(t.reason || ''))}</td>
+    </tr>`).join('') : '<tr class="empty"><td colspan="11">没有产生成交</td></tr>';
+  }
+}
 /* ================================================================ 详情抽屉 */
 async function openDetail(code) {
   const dw = $('#drawer');
@@ -3001,41 +2894,6 @@ const PANES = {
       $('#pm-body').innerHTML = `<div class="tablewrap pm-tw">${tbl.querySelector('table').outerHTML}</div>`;
     },
   },
-  bt: {
-    t: '信号检验 · 全部结果', s: '只看这批信号本身好不好，赚多少钱请在「模拟账户」里看',
-    build: () => {
-      const box = $('#pm-body');
-      if (!S.bt) {
-        box.innerHTML = '<div class="empty-state"><b>还没检验过</b><span>先在本页点「开始检验」，跑完再回来看</span></div>'; return;
-      }
-      const tbl = $('#bt-table');
-      // 结论卡跟着一起搬进来：大窗口里更该先看到"能不能用"，再谈细节
-      const vd = $('#bt-verdict');
-      const vdHtml = (vd && !vd.hidden) ? vd.outerHTML : '';
-      box.innerHTML = `${vdHtml}<div class="pm-panel"><div class="ph"><b>一、信号质量</b></div><div class="kpis">${$('#bt-kpis').innerHTML}</div></div>
-        <div class="pm-row2">
-          <div class="pm-panel"><div class="ph"><b>一笔一笔赚了多少</b><span class="muted">每笔的净收益率 %，按区间分堆</span></div>${$('#bt-dist').innerHTML}</div>
-          <div class="pm-panel"><div class="ph"><b>为什么卖出的</b></div>${$('#reason-box').innerHTML}</div>
-        </div>
-        <div class="pm-panel"><div class="ph"><b>二、一笔一笔看</b><span class="muted">${esc(($('#bt-meta') || {}).textContent || '')}</span></div>
-          <div class="tablewrap pm-tw">${tbl.querySelector('table').outerHTML}</div></div>`;
-    },
-  },
-  pf: {
-    t: '模拟账户 · 全部明细', s: '钱只有一份，买满了就买不进，还要扣手续费和滑点',
-    build: () => {
-      const box = $('#pm-body'), tbl = $('#pf-table');
-      if (!S.pf) {   // 还没模拟过：别把主页那几张空壳搬进来
-        box.innerHTML = '<div class="empty-state"><b>还没模拟过</b><span>先在本页点「模拟一遍」，跑完再回来看全部明细。</span></div>';
-        return;
-      }
-      box.innerHTML = `<div class="pm-panel"><div class="ph"><b>一、账户现在什么样</b></div><div class="kpis">${$('#pf-kpis').innerHTML}</div></div>
-        <div class="pm-panel"><div class="ph"><b>账户余额怎么走的</b><span class="muted">现金 + 持仓市值，扣掉手续费和滑点</span></div><canvas id="pm-pf" class="cv" height="280"></canvas></div>
-        <div class="pm-panel"><div class="ph"><b>二、一买一卖都记下来</b><span class="muted">${esc(($('#pf-meta') || {}).textContent || '')}</span></div>
-          <div class="tablewrap pm-tw">${tbl.querySelector('table').outerHTML}</div></div>`;
-      drawChartTo('#pm-pf', $('#pf-chart'));
-    },
-  },
   method: {
     t: '使用说明', s: '按类分开看，一屏一类',
     tabs: [['rule', '五个条件'], ['trade', '怎么买怎么卖'], ['data', '数据从哪来']],
@@ -3510,8 +3368,9 @@ async function init() {
   $('#btn-scan').onclick = runScan;
   bindWatchlistPanel();
   bindMemoryPanel();
-  $('#btn-bt').onclick = runBacktest;
-  $('#btn-pf').onclick = runPortfolio;
+  // 收益曲线的「跑一遍」在 renderEquity 里绑（那函数可能先于这里有数据）
+  const cvBtn = $('#btn-cv');
+  if (cvBtn) cvBtn.onclick = runEquity;
   $('#btn-save').onclick = saveSettings;
   $('#btn-reset').onclick = async () => {
     if (!confirm('恢复所有参数为默认值？')) return;

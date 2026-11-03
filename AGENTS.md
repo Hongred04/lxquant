@@ -56,7 +56,8 @@
 | `indicators.py` | 指标与筹码分布（MA/量比/获利盘） | |
 | `strategies/` | 策略与关卡（`oversold_bounce` 是唯一在用的） | 新策略继承 `base.py` 的 Strategy |
 | `screener.py` | 全市场筛选主流程 | `basis` 口径判定在 `basis_label()` |
-| `backtest.py` | 回测 + `robust_score` 分折稳健分 | 交易排序必须完全确定，见下 |
+| `backtest.py` | 回测 + `robust_score` 分折稳健分 | **只服务详情抽屉的「历史同类信号」**，页面上没有独立入口了；交易排序必须完全确定，见下 |
+| `equity.py` | 收益曲线：`portfolio.run()` 的结果落盘 `data/equity.json` | 改撮合口径要同步 `CACHE_VERSION`，否则旧曲线冒充新口径 |
 | `verdict.py` | 策略准入判定（四级结论） | 门槛常量集中在文件顶部 |
 | `memory.py` | 选股记忆：记账、回看涨跌、总账 | 有写入保护，改动前先读 §一.4 |
 | `auto.py` | 自动调度线程（首扫/尾盘扫/补扫） | `_final_reason()` 是纯函数，好测 |
@@ -65,9 +66,9 @@
 | `limitup.py` | 涨停/连板识别（按板块分 10%/20%/30%，ST 5%） | 别在别处写死 9.9% |
 | `emotion.py` | 东财涨停池：官方连板数、板块、炸板次数 | 失败返回空，不许当必需品 |
 | `server.py` | HTTP 服务 + 32 个 `/api/*` 路由 | 路由是 if-elif 长链，加接口见 §三 |
-| `watchlist.py` / `portfolio.py` | 自选股提醒 / 模拟账户 | |
+| `watchlist.py` / `portfolio.py` | 自选股提醒 / 资金撮合（收益曲线的计算内核） | |
 
-前端 `web/`：`index.html`（单页，7 个 view）+ `app.js`（**3500+ 行，131 个函数**）+ `style.css`。
+前端 `web/`：`index.html`（单页，6 个 view）+ `app.js`（**3500 行，122 个函数**）+ `style.css`。
 `app.js` 内部有 12 个 `/* ==== 分区 ==== */` 注释，改之前先 `grep -n "====" web/app.js` 定位，
 不要整文件通读。
 

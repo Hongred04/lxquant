@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # 网页目录：默认 web/；LXQ_WEB 可指到别处（调试或另做一套界面时用）。
 # 手机版 web_m/ 已于 2026-10-30 删除 —— 打包成 APK 在手机上跑太慢，不再维护那条线。
 WEB = Path(os.environ.get("LXQ_WEB") or (ROOT / "web"))
-APP_VERSION = "1.9.2"
+APP_VERSION = "1.9.3"
 
 # ---------------------------------------------------------------- 任务状态
 class Job:
@@ -206,23 +206,26 @@ def job_scan(j: Job, params, weights, limit, mode):
     return r
 
 
-def job_backtest(j: Job, params, weights, limit, mode, codes, lookback):
-    r = backtest.run_backtest(params, weights, codes=codes, limit=limit, mode=mode,
-                              lookback=lookback, progress=j.progress)
-    j.result_extra = True
-    _save_export("backtest", r)
-    return r
+def job_equity(j: Job, params, weights, limit, mode, codes, lookback,
+               initial_cash, max_pos, pos_pct, commission, stamp, slippage, prm=None):
+    """跑模拟并**顺手写缓存** —— 前端下一次打开就有图，不用再等十几秒。
 
-
-def job_portfolio(j: Job, params, weights, limit, mode, codes, lookback,
-                  initial_cash, max_pos, pos_pct, commission, stamp, slippage):
-    from . import portfolio
+    prm 是这次实际用的参数（含本金/仓位），跟着结果一起存，
+    界面才能说清"这条曲线是按什么条件算的"。
+    """
+    from . import equity, portfolio
     r = portfolio.run(params, weights, codes=codes, limit=limit, mode=mode,
                       lookback=lookback, initial_cash=initial_cash, max_pos=max_pos,
                       pos_pct=pos_pct, commission=commission, stamp=stamp,
                       slippage=slippage, progress=j.progress)
+    if r.get("ok"):
+        try:
+            equity.save(r, prm or {})
+        except Exception:
+            # 缓存写不进去不能影响这次的结果：曲线已经在返回体里了
+            pass
     j.result_extra = True
-    _save_export("portfolio", r)
+    _save_export("equity", r)
     return r
 
 
@@ -506,6 +509,11 @@ class Handler(BaseHTTPRequestHandler):
                 if q.get("overview"):
                     return self._json({"ok": True, **memory.overview(int(q.get("n") or 30))})
                 return self._json({"ok": True, "days": memory.list_days(int(q.get("n") or 60))})
+            if p == "/api/equity":
+                # 收益曲线：只读缓存（几毫秒）。真正跑模拟在 POST 那边，
+                # 因为要读几十只票的日线、逐日撮合，十几秒起步 —— 不能放在 GET 里。
+                from . import equity
+                return self._json({"ok": True, **equity.view()})
             if p == "/api/kline":
                 # 单独取某一个周期的 K 线（详情页默认已经从 /api/detail 里拿到三套，
                 # 这里是给以后加"下一段历史"之类的按需加载留的口子）
@@ -662,23 +670,20 @@ class Handler(BaseHTTPRequestHandler):
                 j = start_job("scan", job_scan, cfg["params"], cfg["weights"],
                               int(b.get("limit", 60)), b.get("mode", "balanced"))
                 return self._json({"ok": True, "job": j.as_dict()})
-            if p == "/api/backtest":
+            if p == "/api/equity":
+                # 跑一遍并覆盖缓存。参数只有三个是界面给的，其余走 equity.DEFAULTS ——
+                # 一页上摆七八个下拉框，最后没人真去改，反而把曲线挤到看不见。
+                from . import equity
                 cfg = config.load_config()
-                j = start_job("backtest", job_backtest, cfg["params"], cfg["weights"],
-                              int(b.get("limit", 40)), b.get("mode", "balanced"),
-                              b.get("codes") or None, int(b.get("lookback", 1000)))
-                return self._json({"ok": True, "job": j.as_dict()})
-            if p == "/api/portfolio":
-                cfg = config.load_config()
-                j = start_job("portfolio", job_portfolio, cfg["params"], cfg["weights"],
-                              int(b.get("limit", 40)), b.get("mode", "balanced"),
-                              b.get("codes") or None, int(b.get("lookback", 1000)),
-                              float(b.get("initial_cash", 1000000)),
-                              int(b.get("max_pos", 5)),
-                              float(b.get("pos_pct", 0.2)),
-                              float(b.get("commission", 2.5e-4)),
-                              float(b.get("stamp", 1e-3)),
-                              float(b.get("slippage", 0.001)))
+                prm = dict(equity.DEFAULTS)
+                prm["initial_cash"] = float(b.get("initial_cash") or prm["initial_cash"])
+                prm["max_pos"] = int(b.get("max_pos") or prm["max_pos"])
+                prm["lookback"] = int(b.get("lookback") or prm["lookback"])
+                j = start_job("equity", job_equity, cfg["params"], cfg["weights"],
+                              prm["limit"], b.get("mode", "balanced"),
+                              b.get("codes") or None, prm["lookback"],
+                              prm["initial_cash"], prm["max_pos"], prm["pos_pct"],
+                              prm["commission"], prm["stamp"], prm["slippage"], prm)
                 return self._json({"ok": True, "job": j.as_dict()})
             if p == "/api/job/stop":
                 j = JOBS.get(b.get("id", ""))

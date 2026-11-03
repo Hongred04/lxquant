@@ -18,6 +18,9 @@ data/watchlist.json
 # 选股记忆（本机积累的回看记录，换机器重新开始攒）
 data/memory/
 
+# 收益曲线的模拟结果（跑一次十几秒，换机器重新跑一遍就行）
+data/equity.json
+
 # 删掉的功能留下的人工数据（隔夜低吸账本等），留着可查，不进仓库
 data/backup/
 
