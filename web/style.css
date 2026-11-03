@@ -578,32 +578,6 @@ tr.empty td{text-align:center;color:var(--txt-3);padding:26px 0!important;cursor
   border-bottom:1px dashed color-mix(in srgb,var(--accent-2) 55%,transparent)}
 .hintline .lnk:hover{color:var(--accent-soft);border-bottom-style:solid}
 
-/* T+1 警示条：这条策略在真实规则下不成立，必须一眼看见，不能藏在正文里。
-   用左侧粗边 + 淡红底，比整块红底克制 —— 它是常驻信息，不是一次性报错。 */
-.t1warn{
-  display:flex;flex-direction:column;gap:5px;
-  margin:0 0 12px;padding:11px 14px;
-  border:1px solid rgba(255,95,109,.28);border-left:3px solid var(--up);
-  border-radius:var(--radius);background:rgba(255,95,109,.06);
-  font-size:12.5px;line-height:1.75;color:var(--txt-2);
-}
-.t1warn>b{color:var(--up);font-size:13px}
-.t1warn b{color:var(--txt)}
-.t1warn .muted{color:var(--txt-3);font-size:12px}
-
-/* 「我买了吗」两个小按钮 —— 三态里的中间态（还没标）就是两个都没亮。
-   刻意不做成 checkbox：买/没买不是二选一的是非题，"还没说"也是合法状态，
-   而且点已选中的那个要能取消（回过头发现标错了）。 */
-.exg{display:inline-flex;gap:4px}
-.ex-b{
-  padding:2px 8px;font-size:11.5px;line-height:1.6;cursor:pointer;
-  border:1px solid var(--line-2);border-radius:6px;background:transparent;
-  color:var(--txt-3);font-family:inherit;transition:all .12s;
-}
-.ex-b:hover{color:var(--txt);border-color:var(--txt-3)}
-.ex-b[data-exec="true"].on{background:rgba(255,95,109,.12);border-color:rgba(255,95,109,.5);color:var(--up)}
-.ex-b[data-exec="false"].on{background:var(--panel-2);border-color:var(--txt-3);color:var(--txt-2)}
-/* 成绩单为空时的说明块：两行、左对齐。
    只给一句「明天起就会有」时，已经记了几天的人会以为功能坏了 ——
    这里要放确切数字，所以字号比普通空状态小一点，别喧宾夺主。 */
 .mem-none{display:flex;flex-direction:column;gap:5px;padding:4px 18px;text-align:left}
@@ -732,14 +706,6 @@ tr.empty:hover{background:transparent!important}
 /* 画布别被拉高：canvas 的 height 属性只给后备尺寸，真正的高度由 JS 设成 220px；
    原来漏了 height 约束，整张图会被拉到和右边卡片一样高（730px），看着像"一块空面板" */
 .cv{width:100%;height:220px;display:block;padding:8px;background:var(--chart-bg);flex:0 0 auto}
-/* 曲线下面的口径说明。把"满仓复利""收盘价近似"这些容易被误读的地方写清楚 ——
-   不写的话，-97% 这种数字会被当成"软件算错了"。字号比正文小一档，它不是重点，
-   但少了它就是误导。 */
-.cnote{padding:2px 13px 11px;font-size:11.5px;line-height:1.75;color:var(--txt-3)}
-.cnote b{color:var(--txt-2);font-weight:500}
-.cnote .up{color:var(--up)}
-.cnote .down{color:var(--down)}
-.cnote .lnk{margin-left:4px}
 .reason-box{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
 .rs{display:flex;align-items:center;gap:8px;font-size:12px}
 .rs span{width:112px;flex:none;color:var(--txt-2);line-height:1.5}

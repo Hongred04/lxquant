@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>lxquant · 量价低位选股</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0e14'/%3E%3Cpath d='M6 22l5-7 4 4 5-9 6 12' stroke='%232fd6a5' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=1.9.0" />
+<link rel="stylesheet" href="style.css?v=1.9.2" />
 </head>
 <body>
 <div id="app">
@@ -23,7 +23,6 @@
 
     <nav class="nav">
       <button class="ni active" data-view="screen"><i data-ic="target"></i><span>选股</span></button>
-      <button class="ni" data-view="overnight"><i data-ic="moon"></i><span>隔夜低吸</span></button>
       <button class="ni" data-view="watch"><i data-ic="grid"></i><span>盯盘 / 自选</span></button>
       <button class="ni" data-view="backtest"><i data-ic="chart"></i><span>信号检验</span></button>
       <button class="ni" data-view="portfolio"><i data-ic="wallet"></i><span>模拟账户</span></button>
@@ -34,7 +33,7 @@
 
     <div class="side-foot">
       <div class="stat-line"><span>数据更新到</span><b id="f-data-date">—</b></div>
-      <div class="stat-line"><span>版本</span><b>v1.9.0</b></div>
+      <div class="stat-line"><span>版本</span><b>v1.9.2</b></div>
       <!-- 亮暗切换：固定在左下角，带中文名字，一眼能找到 -->
       <button class="theme-btn" id="theme-btn" title="切换亮色 / 暗色主题">
         <i data-ic="moon"></i><span id="theme-txt">暗色</span>
@@ -429,122 +428,10 @@
       </div>
     </section>
 
-    <!-- ---------- 使用说明 ---------- -->
-    <section class="view" id="view-overnight">
-      <div class="hd">
-      <header class="topbar"></header>
-      <div class="toolbar">
-        <button class="btn ghost" id="btn-ovn-scan"><i data-ic="reset"></i>现在扫一遍并买入</button>
-        <button class="btn ghost" id="btn-ovn-export" title="导出成 CSV，Excel 里按板块、炸板次数、低开幅度分组算"><i data-ic="download"></i>导出账本</button>
-        <span class="spacer"></span>
-        <span class="muted" id="ovn-meta">—</span>
-      </div>
-
-      <!-- 执行方式：和「选股」页同一套节奏，一天只在尾盘动一次 -->
-      <div class="hintline">
-        连板 ≥3 的票出现第一根<b>实体阴线</b>（当前价 ≤ 开盘×0.99）→
-        <b>14:40 当场按当时价买入</b>，下一个交易日 <b>14:50 之后卖出</b>（T+1）。
-        不用早起盯集合竞价。和「选股」页分开记账。<a href="?v=method" class="lnk">详细说明</a>
-      </div>
-
-      <!-- 常驻警示：按这个执行方式回测是负的，必须一眼看见。
-           数据：全市场 354 个首阴样本 / 4.2 年 226 个样本，两个区间同向。 -->
-      <div class="t1warn">
-        <b>按这个执行方式，历史回测是亏的</b>
-        <span>
-          「14:40 买、次日尾盘卖」实测 <b>−1.61%</b>/笔（1.3 年 352 个样本）、
-          <b>−3.12%</b>/笔（4.2 年 227 个）。已含<b>一字跌停卖不掉、顺延到下一日</b>的那部分
-          —— 早先漏掉这条时算出来是 −1.51%，偏乐观 0.10 个百分点。
-          原因不是买点选错，是<b>隔夜在跌</b>：
-          首阴次日平均低开 3.08%，只有 24% 的日子是高开的；
-          日内反弹 +1.66%，但补不回跳空。
-        </span>
-        <span class="muted">页面按你的操作方式实现，账本会如实记录每一笔。但别把这里的信号当必胜依据。</span>
-      </div>
-
-      <div class="kpis" id="ovn-kpis"></div>
-
-      <!-- 收益率曲线：回答「这套规则本身赚不赚钱」，用全市场历史回测（含没买的信号），
-           和下面的账本是两件事 —— 那条记的是"你实际做了什么"。
-           曲线按**卖出日**阶梯跳：钱只在卖出那一刻变，不是买入当天。 -->
-      <div class="panel" id="ovn-curve">
-        <div class="ph">
-          <b>这套规则的收益率</b>
-          <span class="muted" id="ovn-curve-sub">正在取…</span>
-        </div>
-        <canvas id="ovn-cv" class="cv" height="260"></canvas>
-        <div class="cnote" id="ovn-curve-note">—</div>
-      </div>
-
-      <div class="empty-state" id="ovn-loading" hidden>
-        <b><span class="spin"></span> 正在读隔夜低吸的账本…</b>
-      </div>
-
-      <div class="empty-state" id="ovn-empty" hidden>
-        <b>还没有记录</b>
-        <span>每个交易日 14:40 自动扫一遍、当场买入；软件没开过就点上面的按钮补一份（用收盘价）。</span>
-      </div>
-
-      <!-- 持仓：14:40 买入、还没卖出的。买没买由你点 ——
-           软件没法知道你实际下没下单，但它照样把这笔的价格和收益记下来。 -->
-      <div class="panel" id="ovn-open" hidden>
-        <div class="ph"><b>持仓</b><span class="muted">14:40 买入价 · 次日 14:50 之后自动卖</span></div>
-        <div class="tablewrap" style="max-height:260px">
-          <table class="grid">
-            <thead><tr>
-              <th>代码</th><th>名称</th><th class="num">连板</th>
-              <th>买入日</th><th class="num">买入价</th><th class="num">当天涨跌</th>
-              <th>我买了吗</th><th>状态</th>
-            </tr></thead>
-            <tbody id="tb-ovn-open"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="panel" id="ovn-recent" hidden>
-        <div class="ph"><b>最近记录</b><span class="muted" id="ovn-recent-sub"></span></div>
-        <div class="tablewrap" style="max-height:380px">
-          <table class="grid">
-            <thead><tr>
-              <th>买入日</th><th>代码</th><th>名称</th><th class="num">连板</th>
-              <th class="num">买入价</th><th class="num">卖出价</th>
-              <th class="num">收益</th><th>执行</th>
-            </tr></thead>
-            <tbody id="tb-ovn-recent"></tbody>
-          </table>
-        </div>
-      </div>
-      </div>
-    </section>
 
     <section class="view" id="view-method">
       <div class="hd">
       <header class="topbar"></header>
-      </div>
-
-      <!-- 第二条策略线：这里只摆"和上面那套的区别"，不展开全部细节。
-           不摆的话，用户会照着上面的习惯"当天收盘买"，而那正好是这条线唯一亏钱的买法。 -->
-      <div class="panel" id="meth-overnight">
-        <div class="ph"><b>另一条线：隔夜低吸</b><span class="muted">和下面这套完全分开，各记各的账</span></div>
-        <div class="rules">
-          <div class="rule" title="连板 ≥3 的票出现第一根实体阴线。收盘后自动出名单，写在「隔夜低吸」页。">
-            <b>选</b><div class="ru-t">连板股第一根阴线</div>
-            <code>连板 ≥3 · 收盘 &lt; 开盘×0.99</code><i class="on">收盘后出名单</i>
-          </div>
-          <div class="rule" title="A 股集合竞价的成交价就是开盘价；9:25 挂市价单，拿到的就是开盘价。">
-            <b>买</b><div class="ru-t">次日 9:25 集合竞价</div>
-            <code>挂市价，成交价 = 开盘价</code><i class="on">9:25 前挂单</i>
-          </div>
-          <div class="rule" title="A 股 T+1：当天买入的股票当天不能卖，最早下一个交易日。">
-            <b>卖</b><div class="ru-t">最早第三个交易日</div>
-            <code>T+1：隔一天才卖得掉</code><i class="on">当天卖不了</i>
-          </div>
-        </div>
-        <div class="meth-note">
-          同一批信号，<b>信号当天收盘买是 <span class="down">−1.28%</span>，次日开盘买是 <span class="up">+1.70%</span></b>
-          —— 差一个晚上，结果正好反过来。来源：2025-08 ~ 2026-10，全市场 435 个样本。
-        </div>
-      </div>
 
       <div class="panel">
         <div class="ph"><b>入选条件</b><span class="muted">五条全过才算「能买」</span></div>
@@ -590,6 +477,7 @@
         <span class="spacer"></span>
         <a class="btn ghost sm" data-go="backtest" href="?v=backtest">看信号质量</a>
         <a class="btn ghost sm" data-go="settings" href="?v=settings">改门槛</a>
+      </div>
       </div>
     </section>
 
@@ -684,7 +572,7 @@
   </div>
   <div class="mf"><span class="muted" id="wm-foot"></span><span class="spacer"></span><span class="muted">点任意一只看详情 · Esc 关掉</span></div>
 </div>
-<script src="_demo.js?v=1.9.0"></script>
-<script src="app.js?v=1.9.0"></script>
+<script src="_demo.js?v=1.9.2"></script>
+<script src="app.js?v=1.9.2"></script>
 </body>
 </html>

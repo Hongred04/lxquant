@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # 网页目录：默认 web/；LXQ_WEB 可指到别处（调试或另做一套界面时用）。
 # 手机版 web_m/ 已于 2026-10-30 删除 —— 打包成 APK 在手机上跑太慢，不再维护那条线。
 WEB = Path(os.environ.get("LXQ_WEB") or (ROOT / "web"))
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.9.2"
 
 # ---------------------------------------------------------------- 任务状态
 class Job:
@@ -472,26 +472,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, **auto.status(),
                                    "preview_now": auto._preview_at(cfg["params"], _dt.now()),
                                    "tail_from": cfg["params"].get("tail_from", "14:30")})
-            if p == "/api/overnight":
-                # 隔夜低吸（首阴套利）：待买 / 持仓 / 历史 / 统计，一次给全。
-                # 和主策略完全分开的账本 —— 持有期只有 1 天，混在一起算会失真。
-                from . import overnight
-                return self._json({"ok": True, **overnight.view()})
-
-            if p == "/api/overnight/curve":
-                # 规则本身的历史收益率曲线（全市场回测），和账本是两件事。
-                # 单独一个接口是给前端轮询用的：首次要算 30 秒，页面不能干等，
-                # 所以先渲染已有曲线，再每 5 秒问一次"算完了没"。
-                from . import ovnbt
-                return self._json({"ok": True, **ovnbt.view()})
-
-            if p == "/api/overnight/export":
-                # 账本导出成 CSV。要验证"弱板是不是更差"这类假设，必须在表格里分组算，
-                # 界面上点不出结论。
-                from . import overnight
-                name = f"overnight_{time.strftime('%Y%m%d')}.csv"
-                return self._file(name, overnight.export_csv())
-
             if p == "/api/log":
                 # 运行日志：默认给最近 120 行；errors=1 只要异常行。
                 # 出问题时（"昨天怎么没记录"这类）这是最快的定位入口。
@@ -658,32 +638,6 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 return self._json({"ok": True, **cfg})
-            if p == "/api/overnight/mark":
-                # 标记「我买了 / 我没买 / 还没说」。
-                # 软件无法知道你下没下单（券商不会告诉我们），只能让用户点一下；
-                # 猜的话账本立刻变脏，而干净样本是这套东西唯一的价值。
-                from . import overnight
-                # 注意用 do_POST 开头已经读好的 b，不要再调 self._body() ——
-                # rfile 里已经没有第二个 body，第二次 read(n) 会一直等，请求直接挂住。
-                n = overnight.mark_exec(
-                    str(b.get("code") or ""),
-                    str(b.get("buy_date") or ""),
-                    b.get("exec"),             # true / false / null
-                )
-                return self._json({"ok": True, "changed": n, **overnight.view()})
-
-            if p == "/api/overnight/scan":
-                # 手动补跑：先卖掉该卖的（buy_date < 今天），再扫今天的首阴并当场买入。
-                # 重复点不会重复记账（do_scan 按 code+buy_date 去重）。
-                from datetime import datetime as _dt
-                from . import overnight
-                today = _dt.now().strftime("%Y-%m-%d")
-                closed = overnight.do_settle(today)
-                sig = overnight.do_scan(today)
-                return self._json({"ok": True, "closed": closed,
-                                   "bought": len([x for x in sig
-                                                  if str(x.get("buy_date")) == today]),
-                                   **overnight.view()})
             if p == "/api/cache/clear":
                 n = store.clear_cache(b.get("kind"))
                 return self._json({"ok": True, "removed": n, "cache": store.cache_info()})

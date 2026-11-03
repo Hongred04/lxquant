@@ -275,47 +275,11 @@ def _final_reason(p: dict, now: datetime, done_today: bool) -> str:
     return "尾盘终极扫" if _now_hm(now) <= 15 * 100 + 5 else "收盘后补扫"
 
 
-_OVN_LAST = [0.0]
-
-
-def _ovn_maybe(now) -> None:
-    """隔夜低吸（首阴套利）的三步状态机探针。
-
-    设计要点：
-      · 跑在**独立线程**里 —— 它需要拉全市场快照，重建连板历史还要读几千个
-        日线文件（约 90 秒），绝不能卡住主扫描；
-      · 60 秒才探一次，避免每个循环都去读状态文件；
-      · 正在全市场扫描时直接让路，不跟主流程抢网络；
-      · 任何异常只记日志 —— 这条线挂了不能影响主策略选股。
-    """
-    if _STATE["busy"] or _STATE["hold"]:
-        return
-    if time.time() - _OVN_LAST[0] < 60:
-        return
-    _OVN_LAST[0] = time.time()
-
-    def run():
-        try:
-            from . import overnight, runlog
-            r = overnight.tick(now)
-            if r:
-                runlog.info("overnight.tick", result=r)
-        except Exception:
-            try:
-                from . import runlog
-                runlog.exc("overnight.fail")
-            except Exception:
-                pass
-
-    threading.Thread(target=run, name="overnight", daemon=True).start()
-
-
 def _loop():
     """调度主循环：没到点就多睡，到点前后每 30 秒看一眼。"""
     time.sleep(4)          # 等服务起来
     _fail = 0              # 连续异常计数，用来做退避
     while _STATE["running"]:
-        _ovn_maybe(datetime.now())      # 隔夜低吸：9:25 记开盘价、15:05 结算+出名单
         if _STATE["hold"] or _STATE["busy"]:
             # 用户在手动跑，先让路；这段时间不要碰 config / 日历 / 网络
             # 用户在手动跑全市场扫描，先让路；这段时间不要碰 config / 日历 / 网络

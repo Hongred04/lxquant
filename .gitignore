@@ -17,7 +17,9 @@ data/watchlist.json
 
 # 选股记忆（本机积累的回看记录，换机器重新开始攒）
 data/memory/
-data/overnight/
+
+# 删掉的功能留下的人工数据（隔夜低吸账本等），留着可查，不进仓库
+data/backup/
 
 # Python 缓存
 __pycache__/
