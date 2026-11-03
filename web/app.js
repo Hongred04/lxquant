@@ -311,6 +311,22 @@ function boardBadge(code) {
   return '';
 }
 
+/* 避雷标记：这一只落在全市场打分最差的那 40% 里。
+   刻意不叫「卖出」「不买」—— 打分只说明它在统计上更差，不构成指令，
+   而且它的预测力是"相对"的（最低20%比全市场差 1.1~1.7 个百分点/20日），
+   不是"必跌"。文案必须留出这个余地，否则用户会当成保证。 */
+function avoidBadge(a) {
+  const av = S.lastResult && S.lastResult.avoid;
+  if (!av || !av.ready || !av.items) return '';
+  const it = av.items[a.code];
+  if (!it || !it.drop) return '';
+  const beat = 100 - it.pct;      // 比百分之多少的票更该躲
+  // title 里的换行在浏览器里不生效，用 · 分段
+  const tip = `避雷分 ${it.pct}（越高越好，比 ${beat}% 的股票更该避开）· ${it.why}`
+    + ` · 基准：${av.asof} 有行情的 ${av.pool} 只 · 只降低胜率，不代表一定跌`;
+  return `<i class="av" title="${esc(tip)}">避</i>`;
+}
+
 /* 这一次名单是按哪个价算的：preview / tail 看平均成本线，close 看收盘价。
    判定用哪个口径，表格就得显示哪个口径，否则会出现"判成能买、却显示✗ 0天"的自相矛盾 */
 function basisMode() {
@@ -583,7 +599,7 @@ function renderScreen() {
     return `<tr data-code="${a.code}">
       <td class="c-rank">${a.rank}</td>
       <td class="code">${a.code}</td>
-      <td class="name">${esc(a.name)}${boardBadge(a.code)}</td>
+      <td class="name">${esc(a.name)}${boardBadge(a.code)}${avoidBadge(a)}</td>
       <td class="num">${fmt(a.price)}</td>
       <td class="num ${cls(a.chg_pct)}">${a.chg_pct == null ? '—' : (a.chg_pct > 0 ? '+' : '') + fmt(a.chg_pct)}%</td>
       <td>${scoreCell(a.score, a.plan)}</td>
@@ -626,6 +642,76 @@ function renderMkt(r) {
       + `（参数里关掉「市场状态开关」可以不看这个）` : '');
 }
 
+/** 避雷汇总条：这份名单里有几只该躲。
+ *
+ * 第一次打开时后台还没算完（算一次 15 秒），这时候显示「正在算」并挂一个
+ * 重试定时器 —— 否则用户看到空白，会以为这个功能不存在。
+ */
+const AVOID_RETRY = { n: 0, timer: null };
+
+function renderAvoidBar(av) {
+  const el = $('#avoid-bar');
+  if (!el) return;
+  const total = (S.items || []).length;
+  if (!total) { el.hidden = true; return; }
+
+  if (!av || !av.ready) {
+    el.hidden = false;
+    el.className = 'avbar wait';
+    el.innerHTML = '<span class="tag">避雷</span>'
+      + '正在后台给全市场打分（约 15 秒），算完这里会自动出现结果。';
+    if (AVOID_RETRY.n < 4 && !AVOID_RETRY.timer) {
+      AVOID_RETRY.timer = setTimeout(() => {
+        AVOID_RETRY.timer = null;
+        AVOID_RETRY.n += 1;
+        refreshAvoid();
+      }, 20000);
+    }
+    return;
+  }
+
+  const n = av.n || 0;
+  const miss = total - (av.hit || 0);
+  const stale = av.asof && av.today && av.asof < av.today;
+  let html;
+  if (n > 0) {
+    html = `<span class="tag">避雷</span><b>这 ${total} 只里有 ${n} 只该躲</b>`
+      + `（名字后面标「避」）· 它们落在全市场最低的 ${Math.round((av.drop || 0.4) * 100)}%`;
+  } else {
+    html = `<span class="tag ok">避雷</span><b>这 ${total} 只都不在最差的那批里</b>`;
+  }
+  html += ` · 基准 ${esc(av.asof || '')} 有行情的 ${av.pool} 只`;
+  if (miss > 0) {
+    html += `<br><span class="dim">其中 ${miss} 只没打分：日线缓存还没更新到当天，或上市不足 60 天</span>`;
+  }
+  if (stale) {
+    html += `<br><span class="dim">打分是 ${esc(av.asof)} 的，行情已经走到 ${esc(av.today)} —— `
+      + `点「立即选股」会顺带刷新</span>`;
+  }
+  el.hidden = false;
+  el.className = 'avbar' + (n > 0 ? ' hit' : '') + (stale ? ' stale' : '');
+  el.innerHTML = html;
+}
+
+/** 只刷新避雷标记，不动名单 —— 打分算完时调，不重跑选股。 */
+async function refreshAvoid() {
+  try {
+    const r = await api('/api/last');
+    const av = r && r.result && r.result.avoid;
+    if (!av || !av.ready) {
+      if (AVOID_RETRY.n < 4 && !AVOID_RETRY.timer) {
+        AVOID_RETRY.timer = setTimeout(() => {
+          AVOID_RETRY.timer = null; AVOID_RETRY.n += 1; refreshAvoid();
+        }, 20000);
+      }
+      return;
+    }
+    if (S.lastResult) S.lastResult.avoid = av;
+    renderAvoidBar(av);
+    renderScreen();
+  } catch { }
+}
+
 function applyResult(r, tag) {
   if (!r || !r.stats) { toast('这次没拿到结果', true); return; }
   S.items = r.items || [];
@@ -636,6 +722,7 @@ function applyResult(r, tag) {
   renderWatch();
   renderHl(r);
   try { renderMkt(r); } catch (_) { }
+  try { renderAvoidBar(r.avoid); } catch (_) { }
   const a = r.auto || null;
   const when = a ? (a.at || r.generated_at) : r.generated_at;
   const old = tag === '（上次的结果）' ? ' · 上次跑的' : '';

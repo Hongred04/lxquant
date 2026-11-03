@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # 网页目录：默认 web/；LXQ_WEB 可指到别处（调试或另做一套界面时用）。
 # 手机版 web_m/ 已于 2026-10-30 删除 —— 打包成 APK 在手机上跑太慢，不再维护那条线。
 WEB = Path(os.environ.get("LXQ_WEB") or (ROOT / "web"))
-APP_VERSION = "1.9.3"
+APP_VERSION = "1.9.4"
 
 # ---------------------------------------------------------------- 任务状态
 class Job:
@@ -157,6 +157,30 @@ def _load_last_screen():
         return r if isinstance(r, dict) and r.get("items") is not None else None
     except Exception:
         return None
+
+
+def _attach_avoid(r):
+    """给名单贴避雷标记。算不出来就原样返回 —— 主流程不能因为附带信息挂掉。
+
+    为什么放在返回时贴、而不是扫描时算：扫描一次 3~5 分钟，避雷要读 5000 个
+    pkl 再花 15 秒，塞进去会让扫描更慢；而且名单可能来自三天前的 last_screen.json，
+    那时贴的标记已经过期了。返回时贴，永远是"按当前缓存算的最新标记"。
+    """
+    if not r or not r.get("items"):
+        return r
+    try:
+        from . import avoid
+        avoid.ensure()                       # 缓存过期就在后台重算，本次先用旧的
+        codes = [a.get("code") for a in r["items"] if a.get("code")]
+        info = avoid.annotate(codes)
+        if not info.get("ready"):
+            return r
+        out = dict(r)
+        out["avoid"] = info
+        return out
+    except Exception:
+        traceback.print_exc()
+        return r
 
 
 def _write_screen_csv(r):
@@ -499,6 +523,9 @@ class Handler(BaseHTTPRequestHandler):
                     r = _load_last_screen()      # 软件重开过：读上次存下来的名单
                     if r is not None:
                         _last_screen["result"] = r
+                # 避雷标记：只贴在响应上，不写回 _last_screen —— 否则下次读缓存
+                # 会带着上一轮的标记，看起来像是当时算的。
+                r = _attach_avoid(r)
                 return self._json({"ok": True, "result": r})
             if p == "/api/memory":
                 # 选股记忆：有哪几天、每天选了谁、回头看涨没涨
@@ -509,6 +536,12 @@ class Handler(BaseHTTPRequestHandler):
                 if q.get("overview"):
                     return self._json({"ok": True, **memory.overview(int(q.get("n") or 30))})
                 return self._json({"ok": True, "days": memory.list_days(int(q.get("n") or 60))})
+            if p == "/api/avoid":
+                # 避雷打分：只读缓存。真正算一次 15 秒，落在 POST 那边。
+                # 查名单标记用 /api/last（已经贴好了），这里主要给页面看池子状态。
+                from . import avoid
+                codes = [c for c in (q.get("codes") or "").split(",") if c]
+                return self._json({"ok": True, **avoid.view(codes or None)})
             if p == "/api/equity":
                 # 收益曲线：只读缓存（几毫秒）。真正跑模拟在 POST 那边，
                 # 因为要读几十只票的日线、逐日撮合，十几秒起步 —— 不能放在 GET 里。
@@ -685,6 +718,14 @@ class Handler(BaseHTTPRequestHandler):
                               prm["initial_cash"], prm["max_pos"], prm["pos_pct"],
                               prm["commission"], prm["stamp"], prm["slippage"], prm)
                 return self._json({"ok": True, "job": j.as_dict()})
+            if p == "/api/avoid":
+                # 强制重算避雷打分。同步算 15 秒 —— 这个接口只在用户主动点
+                # 「重新打分」时才走，不是在页面轮询路径上，所以可以等。
+                # items 是 2300 条明细（51 KB），不回给前端：前端要的是汇总。
+                from . import avoid
+                r = avoid.build()
+                return self._json({"ok": True,
+                                   **{k: v for k, v in r.items() if k != "items"}})
             if p == "/api/job/stop":
                 j = JOBS.get(b.get("id", ""))
                 if j:

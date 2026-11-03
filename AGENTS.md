@@ -35,13 +35,26 @@
    测试写记忆文件时用 `1999-xx-xx` 这种假日期，跑完删掉。
 
 5. **改源码用二进制模式读写，别顺手改行尾。**
-   `lxquant/server.py` 是 **CRLF**，其余文件是 **LF**。用 `open(p,'w')` 整体写回会把整个
-   文件的行尾换掉，`git diff` 从 80 行变成 900 行，review 时真改动被淹没。
-   稳妥写法：`open(p,'rb').read()` → 替换 → `open(p,'wb').write()`。
+   这个仓库里两种行尾并存：`web/style.css`、`web/index.html`、`lxquant/server.py`、
+   `screener.py`、`memory.py` 是 **CRLF**；`web/app.js`、`equity.py`、`portfolio.py`、
+   `tests/` 全部、所有 `.md` 是 **LF**。新文件一律用 **LF**。
+   用 `open(p,'w')` 整体写回会把整个文件的行尾换掉，`git diff` 从 80 行变成 900 行，
+   review 时真改动被淹没。稳妥写法：`open(p,'rb').read()` → 替换 → `open(p,'wb').write()`。
+   改完可以自查：
+   ```
+   ./runtime/python.exe -c "b=open('文件','rb').read();print(b.count(b'\r\n'), b.count(b'\n')-b.count(b'\r\n'))"
+   ```
+   两个数都不为 0 = 混行尾，必须修回纯的。
 
 6. **推送 GitHub 要先开代理。**
    `git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin main`
    代理没开时 `git push` 会卡住或报 443 连不上，不是仓库的问题。
+
+7. **避雷打分（`avoid.py`）只标雷，不许悄悄删票。**
+   它的输出是给名单贴一个「避」标记，`screener` 该出几只还出几只。
+   一旦接进筛选流程直接过滤，界面上写的「命中 50 只」就和实际不符了 ——
+   用户会以为那是选股条件，而它其实只是个参考。
+   同理，它在 `/api/last` 里是**贴在响应上**的，不写回 `_last_screen`。
 
 ---
 
@@ -58,6 +71,7 @@
 | `screener.py` | 全市场筛选主流程 | `basis` 口径判定在 `basis_label()` |
 | `backtest.py` | 回测 + `robust_score` 分折稳健分 | **只服务详情抽屉的「历史同类信号」**，页面上没有独立入口了；交易排序必须完全确定，见下 |
 | `equity.py` | 收益曲线：`portfolio.run()` 的结果落盘 `data/equity.json` | 改撮合口径要同步 `CACHE_VERSION`，否则旧曲线冒充新口径 |
+| `avoid.py` | 避雷打分：全市场排「谁最不该买」，落在 `data/avoid.json` | **只标雷不改名单**；池子按最新交易日卡死，见下 |
 | `verdict.py` | 策略准入判定（四级结论） | 门槛常量集中在文件顶部 |
 | `memory.py` | 选股记忆：记账、回看涨跌、总账 | 有写入保护，改动前先读 §一.4 |
 | `auto.py` | 自动调度线程（首扫/尾盘扫/补扫） | `_final_reason()` 是纯函数，好测 |
@@ -113,6 +127,13 @@
   要显式 `flex:0 0 auto`。
 - **Windows 上端口可能双绑**：重启服务前先确认旧进程真的退了，
   否则新代码没生效而你以为生效了（`netstat -ano | grep :8777` 看 PID）。
+- **日线缓存是按需更新的，不是全市场同步**。实测 5234 只里只有 2300 只
+  更新到最新交易日，其余停在十天前。任何要"全市场截面"的计算（避雷打分、
+  因子排序）都必须先按最新交易日过滤池子，拿陈数据算出来的分位是假的。
+  `avoid.py` 的 `_read_pool()` 就是干这个的，别绕过它。
+- **`d_` 是不复权**：除权日会凭空造出「暴跌」。避雷打分用的是 d_ 口径
+  （dl_ 只覆盖 10.6%），所以必须把最近 20 个交易日内有过 |涨跌|>21% 的票剔掉 ——
+  否则那几只的 std20 会被除权顶到天上，白白标红。
 
 ---
 
