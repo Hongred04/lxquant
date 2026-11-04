@@ -14,19 +14,27 @@
    display:none，加了 hidden 属性等于没加，整页被 60vh 的空白顶下去。 */
 [hidden]{display:none!important}
 
-html,body{height:100%}
+html{height:100%}
 body{
-  margin:0; background:var(--bg); color:var(--ink);
+  margin:0; min-height:100%; background:var(--bg); color:var(--ink);
   font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
        "Hiragino Sans GB","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased;
   display:flex; justify-content:center;
 }
 
+/* 布局的第一原则：**永远从顶部开始排**。
+   justify-content:center 在「内容比视口高」时会把溢出量对半分到上下两端 ——
+   顶部那半截被推到滚动区之外，滚动条拉回 0 也依然看不见（大数字被切一半、
+   footer 消失，就是这个问题）。只有高度真的富余时才允许居中。 */
 #app{
-  width:100%; max-width:560px; padding:0 20px 32px;
+  width:100%; max-width:560px; padding:24px 20px 24px;
   display:flex; flex-direction:column;
-  justify-content:center;   /* 内容比视口矮时整体居中，而不是堆在顶部 */
+  /* 有富余就居中，装不下就从顶部开始排 —— 交给浏览器判断，
+     不要用媒体查询猜阈值：窄屏 + 矮屏组合下猜错一次就是整块内容被切掉。
+     不认 safe 关键字的浏览器只当这行不存在，退回上一行的 flex-start。 */
+  justify-content:flex-start;
+  justify-content:safe center;
   min-height:100vh;
 }
 
@@ -34,12 +42,12 @@ body{
 .boot{
   flex:1; display:flex; align-items:center; justify-content:center;
   color:var(--ink3); font-size:13px; letter-spacing:.3px;
-  min-height:60vh;
+  min-height:40vh;
 }
 
 /* ---------- 一、偏离度 ---------- */
 .hero{
-  padding:8px 0 26px; text-align:center;
+  padding:4px 0 24px; text-align:center; flex:0 0 auto;
 }
 .vs{
   display:flex; align-items:baseline; justify-content:center;
@@ -47,21 +55,19 @@ body{
   font-variant-numeric:tabular-nums;
 }
 .vs b{
-  font-size:72px; font-weight:640; line-height:1; color:var(--ink);
+  font-size:72px; font-weight:640; line-height:1.06; color:var(--ink);
 }
 .vs i{
   font-size:30px; font-weight:500; font-style:normal;
   color:var(--ink3); margin-left:3px; letter-spacing:-1px;
 }
-.vs.neg b{color:var(--ink)}
-.vs.pos b{color:var(--ink)}
 
 .vs-cap{
-  margin-top:10px; font-size:12.5px; color:var(--ink3); letter-spacing:.4px;
+  margin-top:8px; font-size:12.5px; color:var(--ink3); letter-spacing:.4px;
 }
 
 .verdict{
-  margin-top:26px;
+  margin-top:22px;
   display:inline-flex; align-items:center; gap:9px;
   padding:9px 20px; border-radius:100px;
   font-size:16px; font-weight:600; letter-spacing:.5px;
@@ -81,17 +87,18 @@ body{
 }
 
 .action{
-  margin-top:16px; font-size:13.5px; color:var(--ink2); min-height:21px;
+  margin-top:14px; font-size:13.5px; color:var(--ink2); min-height:21px;
 }
 .action b{color:var(--ink); font-weight:600}
 
 /* ---------- 二、两只票 ---------- */
 .picks{
   display:grid; grid-template-columns:1fr 1fr; gap:12px;
+  flex:0 0 auto;
 }
 .pick{
   background:var(--card); border:1px solid var(--line); border-radius:var(--r);
-  padding:18px 16px 16px; position:relative; overflow:hidden;
+  padding:16px 16px 15px; position:relative; overflow:hidden;
 }
 .pick .tag{
   position:absolute; top:0; left:0;
@@ -99,14 +106,14 @@ body{
   padding:7px 12px;
 }
 .pick .nm{
-  margin-top:22px; font-size:19px; font-weight:640; letter-spacing:-.2px;
+  margin-top:20px; font-size:18px; font-weight:640; letter-spacing:-.2px;
 }
 .pick .cd{
   margin-top:3px; font-size:11.5px; color:var(--ink3);
   font-variant-numeric:tabular-nums; letter-spacing:.6px;
 }
 .pick .px{
-  margin-top:14px; font-size:15px; font-weight:600;
+  margin-top:12px; font-size:15px; font-weight:600;
   font-variant-numeric:tabular-nums;
 }
 .pick .px i{
@@ -116,12 +123,12 @@ body{
 
 /* ---------- 三、历史 ---------- */
 .hist{
-  border-top:1px solid var(--line); padding-top:24px;
-  margin-top:30px;
+  border-top:1px solid var(--line); padding-top:20px;
+  margin-top:24px; flex:0 0 auto;
 }
-.hist canvas{width:100%; height:150px; display:block}
+.hist canvas{width:100%; height:140px; display:block}
 .facts{
-  margin-top:14px; display:flex; gap:22px;
+  margin-top:12px; display:flex; gap:22px;
   font-size:12px; color:var(--ink3); font-variant-numeric:tabular-nums;
   flex-wrap:wrap;
 }
@@ -131,15 +138,57 @@ body{
 }
 
 footer{
-  margin-top:22px; font-size:11px; color:var(--ink3);
+  margin-top:18px; font-size:11px; color:var(--ink3);
   display:flex; justify-content:space-between; letter-spacing:.3px;
+  flex:0 0 auto;
+}
+
+/* ---------- 高度不够时：先保内容完整，再谈留白 ----------
+   1366×768 的笔记本、上下分屏、浏览器侧边栏开着，可用高度常常只有 500~650。
+   这套压缩把内容从约 720px 收到约 590px（最矮档约 470px），
+   同时保持三块的层级关系不变：只缩间距和字号，不删内容。 */
+@media (max-height:820px){
+  #app{padding-top:16px; padding-bottom:16px}
+  .hero{padding-bottom:16px}
+  .vs b{font-size:54px}
+  .vs i{font-size:23px}
+  .vs-cap{margin-top:6px}
+  .verdict{margin-top:16px; padding:8px 18px; font-size:15px}
+  .action{margin-top:11px}
+  .pick{padding:13px 14px 13px}
+  .pick .nm{margin-top:17px; font-size:17px}
+  .pick .px{margin-top:9px}
+  .hist{margin-top:18px; padding-top:14px}
+  .hist canvas{height:112px}
+  .facts{margin-top:9px}
+  footer{margin-top:12px}
+}
+
+/* 视口比内容还矮（分屏、小窗）：允许滚动，但顶部必须可见 ——
+   所以这里只缩尺寸，不引入任何居中或负 margin。 */
+@media (max-height:640px){
+  #app{padding-top:12px; padding-bottom:12px}
+  .hero{padding-bottom:12px}
+  .vs b{font-size:42px; line-height:1}
+  .vs i{font-size:18px}
+  .verdict{margin-top:12px; padding:6px 15px; font-size:14px}
+  .action{margin-top:9px; font-size:12.5px}
+  .pick{padding:11px 12px 11px}
+  .pick .nm{margin-top:15px; font-size:15.5px}
+  .pick .px{margin-top:7px; font-size:14px}
+  .hist{margin-top:14px; padding-top:12px}
+  .hist canvas{height:84px}
+  .facts{margin-top:8px; gap:18px}
+  .facts b{font-size:14px}
+  footer{margin-top:10px}
 }
 
 /* ---------- 窄屏 ---------- */
 @media (max-width:380px){
-  .vs b{font-size:58px}
+  .vs b{font-size:56px}
   .picks{grid-template-columns:1fr}
   .pick .nm{font-size:17px}
+  .pick .nm{margin-top:18px}
 }
 
 /* 首屏进入时轻微上浮，不做花哨动画：这页面一年只打开几次 */
