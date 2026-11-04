@@ -65,3 +65,11 @@ data/*_quarantine/
 
 # 临时图标（没有代码引用）
 股票.ico
+
+# 大金融板块：运行时缓存与研究中间产物
+# （fin_history.json 是产品数据，要进仓；其余不进）
+data/fin_state.json
+data/fin_list.pkl
+data/long/
+data/long_all.pkl
+result_*.json

@@ -456,6 +456,19 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/ping":
                 # 手机版 App 用它确认内嵌服务已经起来了
                 return self._json({"ok": True, "pong": time.time(), "version": APP_VERSION})
+            if p == "/api/fin":
+                # 大金融中长线：整个软件只剩这一个策略，界面上也只有这一屏。
+                # ensure() 发现缓存过期就在后台重算，本次先返回上一次的结果。
+                from . import finance
+                finance.ensure()
+                return self._json({"ok": True, **finance.view()})
+            if p == "/api/fin/history":
+                # 10 年回测的净值曲线（离线算好存盘，不在请求里跑）
+                try:
+                    f = config.DATA_DIR / "fin_history.json"
+                    return self._json({"ok": True, **json.loads(f.read_text(encoding="utf-8"))})
+                except Exception:
+                    return self._json({"ok": False, "curve": []})
             if p == "/" or p.startswith("/static") or p.endswith((".js", ".css", ".svg", ".ico", ".png", ".html")):
                 return self._static(p.replace("/static/", "/") if p.startswith("/static") else p,
                                     raw=q.get("raw") in ("1", "true"))
@@ -797,17 +810,14 @@ def serve(host="127.0.0.1", port=8777, open_browser=True):
                 py=sys.version.split()[0])
     atexit.register(lambda: runlog.info("app.stop", pid=os.getpid(), why="normal"))
     print("=" * 56)
-    print("  lxquant 量价低位选股系统已启动")
+    print("  lxquant · 大金融中长线")
     print(f"  访问地址: {url}")
-    print("  自动选股已开启：开盘自动扫、盘中定时扫、14:50 尾盘终极扫")
-    print("  打开页面后什么都不用点，软件会自己把名单推上来")
+    print("  打开页面看一行数字：大盘跌到位了没、该买哪两只")
     print("  按 Ctrl+C 或关闭窗口停止")
     print("=" * 56)
-    try:
-        from . import auto
-        auto.start()
-    except Exception:
-        traceback.print_exc()
+    # 不再启动 auto 线程：这套策略一年只做两三次，靠的是「大盘跌破 MA20 超 2%」
+    # 这个日频信号，不需要盘中每 60 秒扫 600 只票。
+    # 原来的自动选股会把 CPU 白烧在没人看的名单上。
     if open_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:

@@ -1,1178 +1,151 @@
-/* =========================================================
-   lxquant 界面样式 —— 紧凑专业交易终端风格
-   支持亮/暗双主题：<html data-theme="dark|light">
-   ========================================================= */
+/* 大金融中长线 —— 一屏三块：偏离度、两只票、一条曲线。
+   没有任何导航、标语、说明段落：这三块之外的东西都是噪音。 */
+
 :root{
-  /* ---- 基础面 ---- */
-  --bg:#0a0d12;
-  --bg-2:#0e1218;
-  --panel:#11161e;
-  --panel-2:#151b25;
-  --line:#1d2530;
-  --line-2:#26303d;
-  --txt:#e6ebf2;
-  --txt-2:#9aa7b8;
-  --txt-3:#63707f;
-  /* ---- 涨跌（A股：红涨绿跌） ---- */
-  --up:#ff4d5e;
-  --down:#12c48b;
-  /* ---- 强调色 ---- */
-  --accent:#2f8bff;
-  --accent-2:#5aa8ff;
-  --accent-soft:#7db4ff;
-  --accent-lite:#4a9bff;
-  --accent-mid:#2677ea;
-  --accent-deep:#1f6fe0;
-  --gold:#f5b544;
-  --gold-soft:#ffcd7a;
-  --gold-deep:#8a6b3a;
-  --orange-soft:#ffb37a;
-  --purple:#b39cff;
-  --ok:#2fd6a5;
-  --ok-soft:#7ef0c9;
-  --warn:#f5b544;
-  --bad:#ff5f6d;
-  --bad-soft:#ff8b95;
-  /* ---- 控件与容器 ---- */
-  --nav-hover:#161d27;
-  --nav-on-txt:#cfe4ff;
-  --logo-bg:#1c2836;
-  --logo-fg:#0a0d12;
-  --btn-hover-line:#37506b;
-  --btn-hover-bg:#1b2430;
-  --ctrl:#232d3a;
-  --toggle-off:#8593a4;
-  --bar-bg:#1a2230;
-  --track:#1e2733;
-  --dot-no:#3b4655;
-  --row-hover:#151d28;
-  --row-line:#151c25;
-  --htbl-line:#161d26;
-  --mi-bg:#131a23;
-  --mi-line:#1a222d;
-  --eq-bg:#141b24;
-  --slug-bg:#1c242f;
-  --slug-txt:#5b6878;
-  --badge-bg:#1b2530;
-  --stepn-bg:#1b2532;
-  --stepn-txt:#8fb7e8;
-  --chipbar-line:#4d5b6d;
-  --toast-bg:#1a2430;
-  --toast-line:#2a3644;
-  --toast-err-bg:#2a171b;
-  --chart-bg:#0c1117;
-  --tab-on-txt:#9cc9ff;
-  --scroll:#26303d;
-  --scroll-h:#33404f;
-  --topbar-bg:rgba(14,18,24,.82);
-  --shadow:0 8px 30px rgba(0,0,0,.45);
-  --mono:"JetBrains Mono","Cascadia Code",Consolas,"SF Mono",monospace;
-  --radius:10px;
+  --bg:#fafaf9; --card:#fff; --line:#e7e5e4;
+  --ink:#1c1917; --ink2:#78716c; --ink3:#a8a29e;
+  --blue:#2563eb; --blue-soft:#eff6ff;
+  --up:#dc2626; --down:#16a34a;   /* A 股：红涨绿跌 */
+  --r:14px;
 }
 
-/* ------------------------------ 亮色主题 ------------------------------ */
-html[data-theme="light"]{
-  --bg:#f2f5f9;
-  --bg-2:#ffffff;
-  --panel:#ffffff;
-  --panel-2:#f6f8fb;
-  --line:#e2e8f0;
-  --line-2:#d3dce7;
-  --txt:#141c26;
-  --txt-2:#4c5a6b;
-  --txt-3:#8492a3;
-  --up:#e0393f;          /* 亮底上用更深的红，保证对比度 */
-  --down:#0c9d6e;
-  --accent:#1f6fe0;
-  --accent-2:#2f8bff;
-  --accent-soft:#2f7fe0;
-  --accent-lite:#4a9bff;
-  --accent-mid:#2677ea;
-  --accent-deep:#1a5fc4;
-  --gold:#c07d10;
-  --gold-soft:#b0730a;
-  --gold-deep:#a8823c;
-  --orange-soft:#ffa155;
-  --purple:#7b5fd6;
-  --ok:#0f9d78;
-  --ok-soft:#35c497;
-  --warn:#c07d10;
-  --bad:#d93a48;
-  --bad-soft:#d94a58;
-  --nav-hover:#eef2f7;
-  --nav-on-txt:#1f6fe0;
-  --logo-bg:#e8eef7;
-  --logo-fg:#ffffff;
-  --btn-hover-line:#a9bbcf;
-  --btn-hover-bg:#eef3f9;
-  --ctrl:#e5ebf3;
-  --toggle-off:#b6c2d1;
-  --bar-bg:#e6ecf4;
-  --track:#e6ecf4;
-  --dot-no:#b9c4d1;
-  --row-hover:#f1f6fc;
-  --row-line:#edf1f6;
-  --htbl-line:#edf1f6;
-  --mi-bg:#f6f9fc;
-  --mi-line:#e4eaf2;
-  --eq-bg:#f1f5fa;
-  --slug-bg:#eef2f7;
-  --slug-txt:#93a1b1;
-  --badge-bg:#eaf0f8;
-  --stepn-bg:#e8eef8;
-  --stepn-txt:#2f6bd0;
-  --chipbar-line:#b7c3d0;
-  --toast-bg:#ffffff;
-  --toast-line:#d8e2ee;
-  --toast-err-bg:#fdf0f1;
-  --chart-bg:#fbfcfe;
-  --tab-on-txt:#1f6fe0;
-  --scroll:#c9d4e1;
-  --scroll-h:#aab8c8;
-  --topbar-bg:rgba(255,255,255,.86);
-  --shadow:0 8px 30px rgba(23,43,77,.10);
-}
-*{box-sizing:border-box}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* [hidden] 必须真的隐藏：.boot 上的 display:flex 会盖掉浏览器默认的
+   display:none，加了 hidden 属性等于没加，整页被 60vh 的空白顶下去。 */
+[hidden]{display:none!important}
+
 html,body{height:100%}
 body{
-  margin:0;background:var(--bg);color:var(--txt);
-  font:13px/1.45 "PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+  margin:0; background:var(--bg); color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+       "Hiragino Sans GB","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased;
+  display:flex; justify-content:center;
 }
-button,input,select{font-family:inherit}
-::-webkit-scrollbar{width:9px;height:9px}
-::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:6px}
-::-webkit-scrollbar-thumb:hover{background:var(--scroll-h)}
-::-webkit-scrollbar-track{background:transparent}
 
-/* hidden 属性必须真的隐藏：.panel/.btn 这些自带 display:flex/inline-flex，
-   会把浏览器默认的 [hidden]{display:none} 顶掉，导致该藏的块还在占位 */
-[hidden]{display:none !important}
-
-#app{display:flex;height:100vh;overflow:hidden;position:relative}
-/* 主页面与二级页共用同一套结构：每一页 = <section class="view"> > <div class="hd">（页面头 + 内容）。
-   只有当前这一页的 .hd 可见；主页面时 .hd 是普通竖排，二级页时 .hd 自己滚、顶栏吸住 */
-main.main.is-sub{gap:0}
-
-/* ---------------- 侧边栏 ---------------- */
-.side{
-  width:196px;flex:0 0 196px;background:var(--bg-2);border-right:1px solid var(--line);
-  display:flex;flex-direction:column;padding:14px 12px;gap:14px;
+#app{
+  width:100%; max-width:560px; padding:0 20px 32px;
+  display:flex; flex-direction:column;
+  justify-content:center;   /* 内容比视口矮时整体居中，而不是堆在顶部 */
+  min-height:100vh;
 }
-.brand{display:flex;align-items:center;gap:9px;padding:2px 4px 10px;border-bottom:1px solid var(--line)}
-.logo{
-  width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:var(--logo-fg);
-  background:linear-gradient(135deg,var(--ok),var(--accent));flex:0 0 32px;
+
+/* ---------- 启动态 ---------- */
+.boot{
+  flex:1; display:flex; align-items:center; justify-content:center;
+  color:var(--ink3); font-size:13px; letter-spacing:.3px;
+  min-height:60vh;
 }
-.bname{font-weight:700;letter-spacing:.3px;font-size:14px}
-.bsub{font-size:11px;color:var(--txt-3);margin-top:1px}
 
-.nav{display:flex;flex-direction:column;gap:3px}
-.ni{
-  display:flex;align-items:center;gap:9px;height:33px;padding:0 10px;border:0;border-radius:8px;
-  background:transparent;color:var(--txt-2);cursor:pointer;font-size:13px;text-align:left;
-  transition:background .15s,color .15s;
+/* ---------- 一、偏离度 ---------- */
+.hero{
+  padding:8px 0 26px; text-align:center;
 }
-.ni:hover{background:var(--nav-hover);color:var(--txt)}
-.ni.active{background:linear-gradient(90deg,rgba(47,139,255,.16),rgba(47,139,255,.03));color:var(--nav-on-txt)}
-.ni.active i{color:var(--accent-2)}
-.ni i{width:16px;height:16px;display:inline-block;color:var(--txt-3)}
-.ni i svg{width:16px;height:16px;display:block}
-/* 二级页（使用说明 / 参数设置）：从主页面钻进去的工具页，压成次要色 + 和上面隔一道细线，
-   一眼就能看出"上面三个是主流程，下面两个是辅助" */
-.nav .ni.sub{color:var(--txt-3);height:30px;font-size:12.5px}
-.nav .ni.sub:first-of-type{margin-top:8px;position:relative}
-.nav .ni.sub:first-of-type::before{content:"";position:absolute;left:10px;right:10px;top:-4px;
-  border-top:1px dashed var(--line-2)}
-.nav .ni.sub:hover{color:var(--txt)}
-.nav .ni.sub.active{color:var(--nav-on-txt)}
-
-.side-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px}
-.stat-line{display:flex;justify-content:space-between;font-size:11px;color:var(--txt-3)}
-.stat-line b{color:var(--txt-2);font-weight:500;font-family:var(--mono)}
-
-/* ---------------- 主区 ---------------- */
-.main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
-.topbar{
-  height:52px;flex:0 0 52px;display:flex;align-items:center;justify-content:space-between;
-  padding:0 16px;border-bottom:1px solid var(--line);background:var(--topbar-bg);backdrop-filter:blur(8px);
+.vs{
+  display:flex; align-items:baseline; justify-content:center;
+  letter-spacing:-2px;
+  font-variant-numeric:tabular-nums;
 }
-.tb-left{display:flex;align-items:baseline;gap:10px;min-width:0}
-.tb-left h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.3px}
-.tb-hint{font-size:11.5px;color:var(--txt-3);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;min-width:0;max-width:520px}
-/* 空的时候完全占 0 宽：顶栏副标题默认不再挂标语（见 app.js 的 HINTS 注释），
-   只有状态信息（扫描中/上次更新时间）出现时才占位 */
-.tb-hint:empty{display:none}
-.tb-right{display:flex;gap:8px;align-items:center}
-.topbar #view-hint{min-width:0}
-/* 窄屏先把提示语收起来，别把右边按钮挤出去 */
-@media (max-width:1320px){ .tb-hint{display:none} }
-
-/* ---------------- 二级页（钻进去的页） ----------------
-   主页面（选股 / 盯盘）保持原样；策略检验、模拟账户、使用说明、参数设置算"二级页"：
-   - 顶部标题 + 本页工具条收进 .hd，吸在顶上不滚走（长表格滚的时候还点得到按钮）
-   - 标题前面多一条"操作台 / xxx"的面包屑，点一下就退回主页面 */
-.crumb{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--txt-3);min-width:0}
-.crumb[hidden]{display:none}
-.crumb-back{
-  display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px 0 5px;border-radius:6px;
-  border:1px solid var(--line-2);background:var(--panel-2);color:var(--txt-2);cursor:pointer;font-size:11.5px;
-  transition:.15s;
+.vs b{
+  font-size:72px; font-weight:640; line-height:1; color:var(--ink);
 }
-.crumb-back:hover{color:var(--accent-2);border-color:var(--btn-hover-line);background:var(--btn-hover-bg)}
-.crumb-back i{width:12px;height:12px;display:inline-block}
-.crumb-back i svg{width:12px;height:12px;display:block}
-.crumb-sep{color:var(--txt-3);opacity:.6}
-.crumb b{color:var(--txt-2);font-weight:600;white-space:nowrap}
-
-#app[data-level="sub"] .topbar{background:var(--bg-2);border-bottom-color:var(--line-2)}
-#app[data-level="sub"] .tb-left{flex:1}
-#app[data-level="sub"] #view-hint{display:none}
-/* 二级页那一栏本身不再滚动，滚动交给里面的 .hd（页面头 + 内容一起滚，页面头吸顶） */
-main.main.is-sub{overflow:hidden}
-/* 主页面：.hd 就是普通一列（里面的块按自己的规矩排），.view 按内容长高，
-   超出一屏的交给自己 overflow:auto 滚（维持原来的手感）。
-   这片区域踩过三个坑，记忆页"滑不动"就是三个叠在一起：
-   ① .view 若是 flex 列，里面的块会被一路压到刚好一屏高，永远没有可滚的内容；
-   ② 就算把 .hd 写成 flex:0 0 auto，flex 列里的子项也要"分配剩余空间"，
-      实际高度仍被压在容器高度上（scrollHeight 永远等于 clientHeight），这条路走不通；
-   ③ .view 若定死 height:100%，里面的内容再长也只有一屏，多出来的溢出而不是撑高。
-   所以主页面不走 flex 列：.view 是普通块、高度 auto，自己滚。
-   二级页（main.main.is-sub，紧跟着的那组）才走 flex 列：.view 不滚，.hd 自己滚、页头吸顶。
-   那组用 .is-sub 打头、写在普通页后面（同权重靠后生效），否则会被上面这条吃掉。 */
-.view > .hd{display:block}
-/* 二级页：.view 不再滚，.hd 自己滚；顶栏 + 本页工具条吸在顶上。
-   注意这里是 display:none，必须让当前页的 .active 把它顶回来 —— 少了后半句，
-   点「参数设置 / 策略检验 / 模拟账户 / 使用说明」就是个空白页（这个坑踩过）
-   还有一处坑：下面这条 .hd 的规则曾经误写成 `main.main.is-sub main.main.is-sub .view > .hd`
-   （选择器重复了一截），永远匹配不到，结果二级页根本没有滚动容器 —— 整页滑不动。 */
-main.main.is-sub .view{display:none;flex:1;min-height:0;padding:0 16px;overflow:hidden}
-main.main.is-sub .view.active{display:flex}
-main.main.is-sub .view > .hd{display:flex;flex-direction:column;gap:10px;flex:1;max-height:none;min-height:0;
-  overflow-y:auto;overflow-x:hidden;margin:0 -16px;padding:0 16px;
-  /* 顶栏和工具条不再吸顶（用户要它们跟内容一起滚走，别悬浮盖住卡片），
-     所以这里只要给底部留一点呼吸空间，不用再撑出 96px 的余量 */
-  padding-bottom:28px}
-main.main.is-sub .view > .hd > .topbar{flex:0 0 auto;height:52px;
-  background:var(--bg-2);box-shadow:0 1px 0 var(--line-2)}
-main.main.is-sub .view > .hd > .toolbar{flex:0 0 auto;background:var(--bg);
-  border-bottom:1px solid var(--line)}
-#app[data-level="sub"] .view > .toolbar{padding-top:10px}
-#app[data-level="sub"] .view > .toolbar .chip.warn{font-size:11px}
-
-/* 表头右侧的"去别处看看"链接（成绩怎么样 → 策略检验，盘中扫一眼 → 盯盘） */
-.ph-link{  display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:6px;
-  font-size:11.5px;color:var(--txt-2);text-decoration:none;border:1px dashed var(--line-2);
-  background:transparent;transition:.15s;white-space:nowrap;flex:0 0 auto;
+.vs i{
+  font-size:30px; font-weight:500; font-style:normal;
+  color:var(--ink3); margin-left:3px; letter-spacing:-1px;
 }
-.ph-link em{font-style:normal;color:var(--accent-2);font-weight:600}
-.ph-link:hover{border-style:solid;border-color:var(--btn-hover-line);background:var(--btn-hover-bg);color:var(--txt)}
-.ph-link[hidden]{display:none}
+.vs.neg b{color:var(--ink)}
+.vs.pos b{color:var(--ink)}
 
-/* 主页面宽屏时表格列多，自动选股状态条不必太长，让位给按钮 */
-@media (max-width:1400px){ .tb-right .auto-pill{max-width:330px} }
-@media (max-width:1180px){ .tb-right .auto-pill{max-width:190px} }
-
-/* 主页整页自己滚（维持原来的手感）。高度写 auto 不写 100%：
-   100% 会把 .view 钉成一屏高，里面的内容再长也只能溢出，overflow:auto 滚不动
-   （记忆页那一堆 KPI + 图表就是这么"滑不动"的）。二级页的 .view 由下面的 is-sub 规则接管。 */
-.view{padding:12px 16px 18px;display:none;flex-direction:column;gap:10px;overflow:auto;height:auto;min-height:0}
-.view.active{display:flex}
-/* 二级页（记忆 / 信号检验 / 模拟账户 / 使用说明 / 参数设置）的 .view 不再额外留底部余量：
-   这几个页面滚的是里面的 .hd（它自己带 28px padding-bottom 收尾），.view 只负责左右各留 16px。
-   这里以前有一条 padding-bottom:110px —— 那是顶栏还吸顶的年代给吸顶栏留的余量。
-   顶栏改成"跟内容一起滚"之后，它唯一的副作用就是把 .hd 的高度生生扣掉 110px：
-   窗口最下面一条永远是空白带，紧贴着它的表格行被齐腰切断，看着像被一块东西盖住了
-   （记忆页"一只一只看"最后一行只露上半截就是这么来的）。 */
-main.main.is-sub .view{padding-bottom:0;scroll-padding-bottom:0}
-
-/* ---------------- 控件 ---------------- */
-.btn{
-  display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:8px;
-  border:1px solid var(--line-2);background:var(--panel-2);color:var(--txt);cursor:pointer;
-  font-size:12.5px;transition:.15s;white-space:nowrap;
+.vs-cap{
+  margin-top:10px; font-size:12.5px; color:var(--ink3); letter-spacing:.4px;
 }
-.btn:hover{border-color:var(--btn-hover-line);background:var(--btn-hover-bg)}
-.btn:active{transform:translateY(1px)}
-.btn i{width:14px;height:14px;display:inline-block}
-.btn i svg{width:14px;height:14px;display:block}
-.btn.primary{
-  background:linear-gradient(180deg,var(--accent),var(--accent-deep));border-color:var(--accent);color:#fff;
-  box-shadow:0 2px 10px rgba(47,139,255,.25);
-}
-.btn.primary:hover{background:linear-gradient(180deg,var(--accent-lite),var(--accent-mid))}
-.btn.ghost{background:transparent}
-.btn.sm{height:24px;padding:0 9px;font-size:11.5px;border-radius:6px}
-.btn.sm em{font-style:normal;color:var(--accent-2);font-weight:600;margin-left:2px}
-a.btn{text-decoration:none}   /* 用 <a> 做的跳转按钮（使用说明页的"看看历史成绩 / 改门槛"） */
-.btn:disabled{opacity:.45;cursor:not-allowed}
 
-.icon-btn{
-  width:28px;height:28px;border-radius:8px;border:1px solid var(--line-2);background:transparent;
-  color:var(--txt-2);cursor:pointer;display:grid;place-items:center;
-}
-.icon-btn:hover{background:var(--btn-hover-bg);color:var(--txt)}
-.icon-btn svg{width:15px;height:15px}
-
-.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.spacer{flex:1}
-.muted{color:var(--txt-3);font-size:11.5px}
-.inl{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--txt-2)}
-select,input[type=number],input[type=text],input.search{
-  height:30px;background:var(--panel-2);border:1px solid var(--line-2);color:var(--txt);
-  border-radius:8px;padding:0 8px;font-size:12.5px;outline:none;transition:.15s;
-}
-select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,139,255,.12)}
-input.search{width:150px}
-.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;height:30px}
-.sg{border:0;background:transparent;color:var(--txt-2);padding:0 12px;font-size:12.5px;cursor:pointer}
-.sg.active{background:rgba(47,139,255,.16);color:var(--nav-on-txt)}
-.chip{
-  display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;font-size:11px;
-  background:var(--nav-hover);border:1px solid var(--line);color:var(--txt-2);
-}
-.chip.warn{color:var(--warn);border-color:rgba(245,181,68,.35);background:rgba(245,181,68,.08)}
-.chip.ok{color:var(--ok);border-color:rgba(45,205,148,.35);background:rgba(45,205,148,.08)}
-
-/* ---------------- 自动选股状态条 ---------------- */
-.auto-pill{
-  display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 11px;border-radius:8px;
-  border:1px solid var(--line-2);background:var(--panel-2);font-size:12px;color:var(--txt-2);
-  max-width:520px;min-width:0;
-}
-.auto-pill b{color:var(--txt);font-weight:600;flex:0 0 auto}
-.auto-pill #auto-txt{
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
-  font-size:11.5px;color:var(--txt-3);
-}
-.auto-pill .ap-dot{width:7px;height:7px;border-radius:50%;background:var(--txt-3);flex:0 0 7px}
-.auto-pill.on{border-color:rgba(47,214,165,.4);background:rgba(47,214,165,.07)}
-.auto-pill.on .ap-dot{background:var(--ok);animation:apulse 2.2s ease-in-out infinite}
-.auto-pill.on #auto-txt{color:var(--txt-2)}
-.auto-pill.busy{border-color:rgba(47,139,255,.45);background:rgba(47,139,255,.08)}
-.auto-pill.busy .ap-dot{background:var(--accent-2);animation:apulse 1s ease-in-out infinite}
-.auto-pill.off{border-color:var(--line);background:transparent}
-.auto-pill.off .ap-dot{background:var(--dot-no)}
-/* 亮色主题下，rgba 里写死的深色绿/蓝靠太近，换成跟随 --ok / --accent */
-html[data-theme="light"] .auto-pill.on{border-color:rgba(15,157,120,.35);background:rgba(15,157,120,.07)}
-html[data-theme="light"] .auto-pill.busy{border-color:rgba(31,111,224,.4);background:rgba(31,111,224,.07)}
-@keyframes apulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(47,214,165,.45)}50%{opacity:.55;box-shadow:0 0 0 4px rgba(47,214,165,0)}}
-
-/* ---------------- 结论条：主页唯一的一句话 ---------------- */
-.hl{
-  display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius);
-  border:0;border-left:2px solid rgba(47,214,165,.55);
-  background:linear-gradient(90deg,rgba(47,214,165,.08),rgba(47,214,165,0) 62%);
-  font-size:12.5px;color:var(--txt-2);min-width:0;
-}
-/* .hl 是 display:flex，不写这条的话 el.hidden=true 关不掉它 */
-.hl[hidden]{display:none}
-/* 市场状态条：告诉用户「现在该不该玩这套规则」。见 lxquant/market_state.py */
-.mktbar{margin:0 12px 10px;padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;
-  border:1px solid var(--line);background:var(--bg-2);color:var(--txt-2)}
-.mktbar[hidden]{display:none}
-.mktbar b{color:var(--txt);margin-right:6px}
-.mktbar .tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;
-  margin-right:8px;border:1px solid var(--line-2)}
-.mktbar.weak{border-color:rgba(18,196,139,.32);background:rgba(18,196,139,.07)}
-.mktbar.weak .tag{color:var(--down);border-color:rgba(18,196,139,.35)}
-.mktbar.strong{border-color:rgba(245,181,68,.32);background:rgba(245,181,68,.07)}
-.mktbar.strong .tag{color:var(--warn);border-color:rgba(245,181,68,.35)}
-.mktbar.mid .tag{color:var(--txt-2)}
-.mktbar.gated{border-color:rgba(255,77,94,.32);background:rgba(255,77,94,.07)}
-.mktbar.gated .tag{color:var(--up);border-color:rgba(255,77,94,.35)}
-.hl .hl-tag{
-  flex:0 0 auto;font-size:10.5px;padding:1px 7px;border-radius:5px;line-height:17px;
-  background:rgba(47,214,165,.16);color:var(--ok);border:1px solid rgba(47,214,165,.3);
-}
-.hl .hl-nums{color:var(--txt-2);white-space:nowrap;display:flex;align-items:baseline;gap:2px}
-.hl .hl-nums em{font-style:normal;color:var(--txt-2);margin-right:6px}
-.hl .hl-num{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--txt);letter-spacing:-.3px}
-.hl .hl-say{color:var(--txt-3);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.hl .spacer{flex:1 1 auto}
-.hl.warn{border-left-color:rgba(245,181,68,.6);background:linear-gradient(90deg,rgba(245,181,68,.09),rgba(245,181,68,0) 62%)}
-.hl.warn .hl-tag{background:rgba(245,181,68,.15);color:var(--warn);border-color:rgba(245,181,68,.32)}
-html[data-theme="light"] .hl{border-left-color:rgba(15,157,120,.5);background:linear-gradient(90deg,rgba(15,157,120,.07),rgba(15,157,120,0) 62%)}
-html[data-theme="light"] .hl.warn{border-left-color:rgba(192,125,16,.5);background:linear-gradient(90deg,rgba(192,125,16,.07),rgba(192,125,16,0) 62%)}
-
-/* ---------------- 选择结果条（表尾那一行） ---------------- */
-.pick-line{
-  display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:9px 12px;border-radius:var(--radius);
-  border:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--txt-2);
-}
-.pick-line b{font-family:var(--mono);color:var(--txt);font-weight:700}
-.pick-line .pl-sep{width:1px;height:12px;background:var(--line-2);flex:0 0 1px}
-.pick-line .pl-msg{color:var(--txt-3);font-size:11.5px}
-.pick-line .pl-ok{color:var(--ok)}
-
-
-/* ---------------- 进度 ---------------- */
-.progress-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:9px 12px}
-.pg-head{display:flex;justify-content:space-between;font-size:11.5px;color:var(--txt-2);margin-bottom:6px}
-.pg-head b{font-family:var(--mono);color:var(--accent-2)}
-.bar{height:4px;background:var(--bar-bg);border-radius:3px;overflow:hidden}
-.bar i{display:block;height:100%;width:0;border-radius:3px;
-  background:linear-gradient(90deg,var(--ok),var(--accent));transition:width .25s ease}
-
-/* ---------------- KPI ---------------- */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:8px}
-.kpi{
-  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:9px 11px;
-  position:relative;overflow:hidden;min-width:0;
-}
-.kpi .k{font-size:11px;color:var(--txt-3);letter-spacing:.2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kpi .v{font-size:19px;font-weight:700;font-family:var(--mono);margin-top:2px;letter-spacing:-.4px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kpi .s{font-size:10.5px;color:var(--txt-3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* 「能买 / 值得盯着」两张是当天的重点，字号和高度都比后面三张统计卡高一档 */
-.kpi.hot{background:linear-gradient(180deg,var(--panel),var(--panel-2));border-color:var(--line-2)}
-.kpi.hot .v{font-size:24px}
-.kpi.hot .k{color:var(--txt-2)}
-
-/* ---------------- 准入结论卡（回测页） ----------------
-   放在 KPI 上面：先给「能不能用」的结论，指标只是支撑证据。
-   四种结论靠左边框和图标底色区分，正文保持中性色，避免满屏红黄绿。 */
 .verdict{
-  background:var(--panel);border:1px solid var(--line);border-left-width:3px;
-  border-radius:var(--radius);padding:11px 14px;margin-bottom:10px;
+  margin-top:26px;
+  display:inline-flex; align-items:center; gap:9px;
+  padding:9px 20px; border-radius:100px;
+  font-size:16px; font-weight:600; letter-spacing:.5px;
+  background:#f5f5f4; color:var(--ink2);
+  border:1px solid var(--line);
 }
-.verdict .v-hd{display:flex;align-items:center;gap:8px;font-size:13.5px}
-.verdict .v-hd b{font-weight:600}
-.verdict .v-ic{
-  flex:0 0 auto;width:18px;height:18px;border-radius:50%;
-  display:inline-flex;align-items:center;justify-content:center;
-  font-size:11px;font-weight:700;line-height:1;color:#fff;
+.verdict .dot{
+  width:9px; height:9px; border-radius:50%;
+  background:var(--ink3); flex:0 0 auto;
 }
-.verdict .v-note{margin:6px 0 9px;color:var(--txt-2);font-size:12px;line-height:1.65}
-.verdict .v-chips{display:flex;flex-wrap:wrap;gap:6px}
-.verdict .vc{
-  display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;
-  border:1px solid var(--line);border-radius:6px;background:var(--panel-2);
-  font-size:11.5px;color:var(--txt-2);white-space:nowrap;
+.verdict.on{
+  background:var(--blue-soft); color:var(--blue); border-color:#dbeafe;
 }
-.verdict .vc i{font-style:normal;font-size:10px;line-height:1}
-.verdict .vc b{font-family:var(--mono);font-weight:600;color:var(--txt)}
-.verdict .vc.ok{border-color:rgba(47,214,165,.3);background:rgba(47,214,165,.07)}
-.verdict .vc.ok i{color:var(--ok)}
-.verdict .vc.no{border-color:rgba(255,95,109,.28);background:rgba(255,95,109,.07)}
-.verdict .vc.no i{color:var(--bad)}
-/* 中间态：没到"可以当默认"的线，但还在"能用"的容忍范围内 —— 标黄不标红，
-   否则 watch 档下面一片红叉，跟结论"能用"自相矛盾。 */
-.verdict .vc.watch{border-color:rgba(245,181,68,.3);background:rgba(245,181,68,.07)}
-.verdict .vc.watch i{color:var(--warn)}
-.verdict.v-pass{border-left-color:var(--ok)}
-.verdict.v-pass .v-ic{background:var(--ok);color:#04251c}
-.verdict.v-watch{border-left-color:var(--warn)}
-.verdict.v-watch .v-ic{background:var(--warn);color:#2a1f04}
-.verdict.v-fail{border-left-color:var(--bad)}
-.verdict.v-fail .v-ic{background:var(--bad)}
-.verdict.v-insufficient{border-left-color:var(--line-2)}
-.verdict.v-insufficient .v-ic{background:var(--txt-3)}
-
-/* ---------------- 运行日志（设置页底部） ----------------
-   默认收起，只在要查"昨天怎么没记录 / 半夜怎么停了"时展开。
-   等宽字体、单行不折，方便比对时间戳。 */
-.runlog{
-  /* flex:0 0 auto 不能省：二级页的 .hd 是 flex 列布局，
-     .set-grid 会把剩余空间吃掉，details 默认允许收缩 ——
-     实测展开后高度只剩 2px，看着像"点了没反应"。 */
-  flex:0 0 auto;
-  margin-top:12px;border:1px solid var(--line);border-radius:var(--radius);
-  background:var(--panel);overflow:hidden;
-}
-.runlog summary{
-  cursor:pointer;padding:9px 12px;font-size:12px;color:var(--txt-2);
-  list-style:none;user-select:none;
-}
-.runlog summary::-webkit-details-marker{display:none}
-.runlog summary:before{content:'▸';display:inline-block;width:14px;color:var(--txt-3)}
-.runlog[open] summary:before{content:'▾'}
-.runlog summary:hover{color:var(--txt)}
-.runlog pre{
-  margin:0;padding:10px 12px;border-top:1px solid var(--line);
-  max-height:320px;overflow:auto;font-family:var(--mono);font-size:11px;
-  line-height:1.65;color:var(--txt-3);white-space:pre;tab-size:4;
-}
-.runlog pre.has-err{color:var(--txt-2)}
-.kpi[data-kpi="watch"]{cursor:pointer}
-.kpi[data-kpi="watch"]:hover{border-color:var(--accent);background:var(--row-hover)}
-.kpi[data-kpi="watch"]:hover .s{color:var(--accent-2)}
-.kpi[data-kpi="watch"]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.kpi[data-kpi="watch"]::before{
-  content:"↗";position:absolute;right:9px;top:7px;font-size:11px;color:var(--txt-3);
+.verdict.on .dot{
+  background:var(--blue);
+  box-shadow:0 0 0 4px rgba(37,99,235,.14);
 }
 
-/* ---------------- 细节弹窗里的三个页签 ---------------- */
-.wt-pane{padding:2px 0 6px}
-.wt-pane[hidden]{display:none}
-#wt-gates .funnel-bar{gap:8px}
-#wt-stats .pick-line{margin-top:10px;border:0;padding:9px 0 0;border-top:1px solid var(--line);font-size:11.5px}
-#wm-tabs button{white-space:nowrap}
-
-/* 主页现在是"一句话 + 一张表"：名单面板不再套一层边框 */
-.panel-flat{border:0;background:transparent}
-.panel-flat .ph{padding:0 2px 8px;border-bottom:0}
-.panel-flat .tablewrap{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
-.panel-flat .pick-line{border:0;background:transparent;padding:8px 2px 0}
-.kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7}
-.kpi.up::after{background:var(--up)} .kpi.down::after{background:var(--down)}
-.kpi.ok::after{background:var(--ok)} .kpi.warn::after{background:var(--warn)}
-
-/* ---------------- 面板 & 表格 ---------------- */
-/* 面板不收缩：它自己被压扁时，里面的 canvas 也会跟着缩，链条一路传上去
-   整页就永远不超过一屏（记忆页"滑不动"就是这么来的）。不收缩 + overflow:hidden
-   效果一样，格子怎么分还是由内容决定 */
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
-  display:flex;flex-direction:column;flex:0 0 auto}
-.ph{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
-.ph b{font-weight:600}
-
-.tablewrap{overflow:auto;max-height:calc(100vh - 330px)}
-table.grid{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
-table.grid thead th{
-  position:sticky;top:0;z-index:2;background:var(--mi-bg);color:var(--txt-3);font-weight:500;
-  text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:11px;
-  letter-spacing:.3px;
+.action{
+  margin-top:16px; font-size:13.5px; color:var(--ink2); min-height:21px;
 }
-table.grid thead th.sortable{cursor:pointer;user-select:none}
-table.grid thead th.sortable:hover{color:var(--txt)}
-table.grid thead th.sorted{color:var(--accent-2)}
-table.grid tbody td{padding:6px 10px;border-bottom:1px solid var(--row-line);white-space:nowrap;color:var(--txt)}
-/* 目标价那格是两行（价格 + 百分比），把上下内边距收紧，让整行高度跟邻居一致 */
-table.grid tbody td:has(em.sub){padding-top:3px;padding-bottom:3px}
-table.grid tbody tr{cursor:pointer;transition:background .12s}
-table.grid tbody tr:hover{background:var(--row-hover)}
-table.grid tbody tr.sel{background:rgba(47,139,255,.1)}
-/* 目标价、止损价这两列只是参考档位，不是当天的行情，压成次要色免得抢现价和涨跌 */
-table.grid tbody td.ref{color:var(--txt-2)}
-.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
-/* 表头也要跟着右对齐：`table.grid thead th` 写了 text-align:left，特异性比 .num 高，
-   不显式覆盖的话表头贴左、数字贴右，整张表看起来就是错位的（记忆页成绩单最明显） */
-table.grid thead th.num{text-align:right}
-/* 分组表头（如「能买 · 算进胜率」跨三列）居中，否则会贴着第一列左边缘，看着像错位 */
-table.grid thead th.grp{text-align:center}
-/* 主数字后面挂的小字（如目标价后的 +15.0%）：不抢主数字的视觉权重 */
-td em.sub{
-  display:block;font-style:normal;font-size:10px;line-height:1.2;
-  color:var(--txt-3);opacity:.85;margin-top:1px;
+.action b{color:var(--ink); font-weight:600}
+
+/* ---------- 二、两只票 ---------- */
+.picks{
+  display:grid; grid-template-columns:1fr 1fr; gap:12px;
 }
-th.num{text-align:right}
-.c-rank{width:38px;color:var(--txt-3);font-family:var(--mono)}
-
-/* 记忆页「每天的成绩单」里，当天那行还没走完：
-   数字是「14:45 买入 → 收盘」，真实但不代表多日走势。
-   整行压暗 + 日期后挂小标签，避免被当成和其他行同口径的成绩。 */
-table.grid tbody tr.pt td{color:var(--txt-2);background:rgba(127,127,127,.045)}
-table.grid tbody tr.pt:hover{background:var(--row-hover)}
-td em.ts{
-  display:inline-block;font-style:normal;margin-left:6px;padding:1px 5px;border-radius:4px;
-  font-size:10px;line-height:14px;color:var(--warn);background:rgba(245,181,68,.1);
-  border:1px solid rgba(245,181,68,.28);vertical-align:1px;
+.pick{
+  background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+  padding:18px 16px 16px; position:relative; overflow:hidden;
 }
-.c-act{width:56px}
-tr.empty td{text-align:center;color:var(--txt-3);padding:26px 0!important;cursor:default}
-/* 说明行里的行内链接：不要浏览器默认的蓝色下划线，跟着主题走。
-   用途：页面顶部那句话太短、说不了"为什么"，这里点一下跳到使用说明。 */
-.hintline .lnk{color:var(--accent-2);text-decoration:none;
-  border-bottom:1px dashed color-mix(in srgb,var(--accent-2) 55%,transparent)}
-.hintline .lnk:hover{color:var(--accent-soft);border-bottom-style:solid}
-
-   只给一句「明天起就会有」时，已经记了几天的人会以为功能坏了 ——
-   这里要放确切数字，所以字号比普通空状态小一点，别喧宾夺主。 */
-.mem-none{display:flex;flex-direction:column;gap:5px;padding:4px 18px;text-align:left}
-.mem-none b{color:var(--txt-2);font-size:12.5px;font-weight:600}
-.mem-none span{color:var(--txt-3);font-size:12px;line-height:1.7}
-/* 累计还是空的时候，表格底下那句"差在哪"：
-   左对齐、不居中，读起来像注释而不是报错。 */
-tr.foot-none td{text-align:left!important;color:var(--txt-3);font-size:12px;
-  line-height:1.75;padding:10px 2px 4px!important;border-top:1px dashed var(--line)}
-tr.foot-none .muted{display:inline-block;margin-top:3px}
-tr.empty:hover{background:transparent!important}
-.up{color:var(--up)!important} .down{color:var(--down)!important}
-
-.code{font-family:var(--mono);color:var(--txt-2)}
-.name{font-weight:600}
-/* 避雷标记（名字后面那个「避」）。刻意用 amber 不用红 ——
-   A 股红=涨，红色小标签放在股票名字旁边会被读成「要涨」。 */
-.av{
-  display:inline-block;font-style:normal;padding:0 4px;height:16px;line-height:16px;
-  border-radius:3px;font-size:10px;margin-left:4px;cursor:help;vertical-align:1px;
-  background:rgba(245,181,68,.16);color:var(--warn);border:1px solid rgba(245,181,68,.34);
+.pick .tag{
+  position:absolute; top:0; left:0;
+  font-size:10.5px; letter-spacing:1.5px; color:var(--ink3);
+  padding:7px 12px;
 }
-/* 避雷汇总条。和 .mktbar 同尺寸，因为它俩是上下相邻的两条提示 */
-.avbar{margin:0 12px 10px;padding:9px 12px;border-radius:8px;font-size:12.5px;
-  line-height:1.6;border:1px solid var(--line);background:var(--bg-2);color:var(--txt-2)}
-.avbar[hidden]{display:none}
-.avbar b{color:var(--txt);margin-right:4px}
-.avbar .tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;
-  margin-right:8px;border:1px solid rgba(245,181,68,.35);color:var(--warn)}
-.avbar .tag.ok{border-color:rgba(18,196,139,.35);color:var(--down)}
-.avbar.hit{border-color:rgba(245,181,68,.30);background:rgba(245,181,68,.06)}
-.avbar.wait .tag{border-color:var(--line-2);color:var(--txt-3)}
-.avbar .dim{color:var(--txt-3);font-size:11.5px}
-.badge{
-  display:inline-block;padding:0 6px;height:17px;line-height:17px;border-radius:4px;font-size:10.5px;
-  background:var(--badge-bg);color:var(--txt-2);margin-left:5px;
+.pick .nm{
+  margin-top:22px; font-size:19px; font-weight:640; letter-spacing:-.2px;
 }
-.badge.b300{background:rgba(47,139,255,.14);color:var(--accent-soft)}
-.badge.b688{background:rgba(245,181,68,.14);color:var(--gold-soft)}
-.badge.b8{background:rgba(160,120,255,.14);color:var(--purple)}
-
-/* 评分条 */
-.score{display:flex;align-items:center;gap:7px}
-.score b{font-family:var(--mono);font-size:12.5px;width:32px;text-align:right}
-.meter{width:52px;height:5px;background:var(--track);border-radius:3px;overflow:hidden;display:block}
-.meter i{display:block;height:100%;min-width:2px;border-radius:3px;background:var(--accent)}
-.m-high i{background:linear-gradient(90deg,var(--ok),var(--ok-soft))}
-.m-mid i{background:linear-gradient(90deg,var(--accent),var(--accent-soft))}
-.m-low i{background:linear-gradient(90deg,var(--gold-deep),var(--gold))}
-/* 判断提示：分数再好看，止损/止盈提示不通过就别急着买 */
-.scorebad{font-size:9.5px;color:var(--gold);border:1px solid rgba(245,181,68,.35);
-  border-radius:4px;padding:0 3px;margin-top:3px;display:inline-block;white-space:nowrap}
-
-/* 连续站上均价线：每天一个小方块 */
-.streak{display:flex;gap:3px;align-items:center}
-.sq{width:14px;height:15px;border-radius:3px;display:grid;place-items:center;font-size:9px;font-family:var(--mono)}
-.sq.y{background:rgba(47,214,165,.16);color:var(--ok);box-shadow:inset 0 0 0 1px rgba(47,214,165,.28)}
-.sq.n{background:var(--slug-bg);color:var(--slug-txt);box-shadow:inset 0 0 0 1px var(--ctrl)}
-.streak em{font-style:normal;color:var(--txt-3);font-size:10.5px;margin-left:3px}
-
-/* 检查标记 */
-.checks{display:flex;gap:4px}
-.ck{height:16px;min-width:16px;padding:0 4px;border-radius:4px;display:grid;place-items:center;font-size:9.5px;
-  background:var(--slug-bg);color:var(--slug-txt);font-weight:700;box-sizing:border-box;white-space:nowrap}
-.ck.y{background:rgba(47,214,165,.14);color:var(--ok)}
-.ck.n{background:rgba(255,95,109,.1);color:var(--bad-soft)}
-/* 都是"没通过"的红点，5 个放一起看不出是第几条，用序号标出来 */
-.checks.warn{counter-reset:ck}
-.checks.warn .ck{counter-increment:ck}
-.checks.warn .ck::after{content:counter(ck);font-size:8px;opacity:.6;margin-left:1px}
-
-/* 条件漏斗 */
-.funnel-bar{display:flex;gap:6px;align-items:stretch;flex-wrap:wrap}
-.fn{
-  flex:1 1 118px;min-width:118px;background:var(--panel);border:1px solid var(--line);border-radius:8px;
-  padding:6px 9px 7px;display:flex;flex-direction:column;gap:3px;position:relative;
+.pick .cd{
+  margin-top:3px; font-size:11.5px; color:var(--ink3);
+  font-variant-numeric:tabular-nums; letter-spacing:.6px;
 }
-/* 条件名要能读全：允许折成两行，两行高度固定，一排卡片才对得齐 */
-.fn .fk{
-  font-size:10.5px;color:var(--txt-3);line-height:1.3;min-height:27px;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
-  overflow:hidden;white-space:normal;
+.pick .px{
+  margin-top:14px; font-size:15px; font-weight:600;
+  font-variant-numeric:tabular-nums;
 }
-.fn .fv{font-size:14px;font-family:var(--mono);font-weight:600;
-  display:flex;align-items:baseline;justify-content:space-between;gap:6px;line-height:1.2}
-/* 百分比跟数字同一行靠右，不再绝对定位去压条件名 */
-.fn .fp{font-size:10px;color:var(--txt-3);font-family:var(--mono);font-weight:400}
-.fn.bad{border-color:rgba(255,95,109,.3)}
-.fn.bad .fv{color:var(--bad-soft)}
-.fn.gate .fv{color:var(--ok)}
-.fn.gate::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ok);opacity:.6}
-/* "最难过"这个标签跟在条件名后面，折行时跟着走 */
-.fk-gate{font-style:normal;font-size:9px;color:var(--ok);background:rgba(47,214,165,.12);
-  border-radius:3px;padding:0 3px;margin-left:3px;vertical-align:1px;white-space:nowrap}
-
-/* 方法说明 */
-.meth-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.meth-grid .panel:nth-child(3){grid-column:1/-1}
-.meth-body{padding:4px 2px 10px;display:flex;flex-direction:column;gap:0}
-.step{display:flex;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
-
-/* ---------- 可折叠的次要小块（使用说明里的「数据从哪来」） ----------
-   正文看一遍就够了，第二遍基本再来查规则；折成一行标题，要查再展开，
-   把"五个条件 / 怎么买卖"这两块真正重要的留在视线里 */
-.fold > .ph{cursor:pointer;user-select:none;border-radius:6px;transition:background .15s}
-.fold > .ph:hover{background:var(--btn-hover-bg)}
-.fold-hint{font-size:11.5px;color:var(--txt-3);transition:color .15s}
-.fold.open .fold-hint{color:var(--txt-2)}
-.fold-caret{width:14px;height:14px;display:inline-flex;color:var(--txt-3);transition:transform .18s}
-.fold-caret svg{width:14px;height:14px;display:block}
-.fold.open .fold-caret{transform:rotate(90deg)}
-.fold-body{display:none}
-.fold.open .fold-body{display:block;animation:foldIn .16s ease-out}
-@keyframes foldIn{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
-.step:last-child{border-bottom:0}
-.step-n{
-  flex:0 0 24px;height:24px;border-radius:7px;background:var(--stepn-bg);color:var(--stepn-txt);
-  display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal;font-family:var(--mono)
-}
-.step-n.b{background:rgba(255,95,109,.14);color:var(--bad-soft)}
-.step-n.s{background:rgba(47,214,165,.14);color:var(--ok)}
-.step h5{margin:1px 0 5px;font-size:13px;color:var(--txt);font-weight:600;display:flex;align-items:center;gap:6px}
-.step p{margin:0 0 5px;font-size:12px;line-height:1.6;color:var(--txt-2)}
-.step ul{margin:0;padding-left:16px;font-size:12px;line-height:1.7;color:var(--txt-2)}
-.step b{color:var(--txt)}
-.step .eq{font-family:var(--mono);font-size:11px;color:var(--stepn-txt);background:var(--eq-bg);border-radius:6px;padding:4px 8px;display:inline-block;margin-top:2px}
-.step code,.meth-body code{font-family:var(--mono);font-size:11px;background:var(--eq-bg);
-  color:var(--accent-soft);padding:1px 4px;border-radius:4px}
-.tag-hot{font-size:10px;font-weight:500;color:var(--ok);border:1px solid rgba(47,214,165,.35);border-radius:4px;padding:0 4px;line-height:15px}
-.htbl td.k{color:var(--txt-3);width:72px}
-
-/* 迷你筹码条 */
-.chipbar{position:relative;width:64px;height:5px;background:var(--track);border-radius:3px;overflow:hidden}
-.chipbar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--up),var(--orange-soft))}
-.chipbar u{position:absolute;top:0;bottom:0;width:1px;background:var(--chipbar-line)}
-
-.row2{display:grid;grid-template-columns:1.6fr 1fr;gap:10px;align-items:start}
-/* 二级页还没跑过数据时的说明块：以前这里是一整块 220px 高的黑画布 + 空卡片，
-   用户看着就像"界面没数据 / 坏了"，所以先给一句人话，跑完再换成图表 */
-.empty-state{background:var(--panel);border:1px dashed var(--line-2);border-radius:var(--radius);
-  padding:26px 20px;display:flex;flex-direction:column;gap:8px;align-items:center;text-align:center}
-.empty-state b{font-size:14px;color:var(--txt)}
-.empty-state span{font-size:12px;line-height:1.75;color:var(--txt-3);max-width:640px}
-/* 画布别被拉高：canvas 的 height 属性只给后备尺寸，真正的高度由 JS 设成 220px；
-   原来漏了 height 约束，整张图会被拉到和右边卡片一样高（730px），看着像"一块空面板" */
-.cv{width:100%;height:220px;display:block;padding:8px;background:var(--chart-bg);flex:0 0 auto}
-/* 曲线下面的口径说明：手续费怎么扣的、上次什么时候算的、数据到哪天。
-   不写的话，「赚了多少」这个数字没法复核，也没法判断是不是陈的。 */
-.cnote{padding:2px 13px 11px;font-size:11.5px;line-height:1.75;color:var(--txt-3)}
-.cnote b{color:var(--txt-2);font-weight:500}
-.cnote .up{color:var(--up)}
-.cnote .down{color:var(--down)}
-
-/* 成交明细折叠块。flex:0 0 auto 不能省：二级页的 .hd 是 flex 列容器，
-   details 默认允许收缩 —— 不写的话展开后高度只剩 2px，看着像"点了没反应"。 */
-.cv-detail{flex:0 0 auto;margin-top:12px;padding:0;overflow:hidden}
-.cv-detail>summary{cursor:pointer;padding:10px 13px;font-size:12px;color:var(--txt-2);list-style:none;user-select:none}
-.cv-detail>summary::-webkit-details-marker{display:none}
-.cv-detail>summary:before{content:'\25B8';display:inline-block;width:14px;color:var(--txt-3)}
-.cv-detail[open]>summary:before{content:'\25BE'}
-.cv-detail>summary:hover{color:var(--txt)}
-.cv-detail>summary b{color:var(--txt);font-size:12.5px;margin-right:6px}
-.reason-box{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
-.rs{display:flex;align-items:center;gap:8px;font-size:12px}
-.rs span{width:112px;flex:none;color:var(--txt-2);line-height:1.5}
-.rs .rbar{flex:1;min-width:24px;height:6px;background:var(--track);border-radius:3px;overflow:hidden}
-.rs .rbar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--accent-soft))}
-/* 信号检验的「一笔一笔赚了多少」：跟全站一致，红涨绿跌，别跟卖出原因那条品牌色混在一起 */
-.rs .rbar i.down{background:linear-gradient(90deg,var(--down),color-mix(in srgb,var(--down) 45%,transparent))}
-.rs .rbar i.up{background:linear-gradient(90deg,var(--up),color-mix(in srgb,var(--up) 45%,transparent))}
-.rs b{font-family:var(--mono);width:52px;flex:none;text-align:right}
-
-/* ---------------- 记忆页 ----------------
-   一进这一页要回答一个问题："那天选的票，后来赚没赚"。所以上面一行成绩、左边一张
-   每只票涨跌的柱状图、右边三句话，底下才是明细和每天的成绩单。
-   明细表的行可以点（跟选股表一样打开详情抽屉），所以要 cursor:pointer。 */
-#view-memory .reason-box .rrow{display:flex;flex-direction:column;gap:3px;
-  padding:8px 0;border-bottom:1px dashed var(--line)}
-#view-memory .reason-box .rrow:last-child{border-bottom:0}
-#view-memory .reason-box .rrow b{font-size:12.5px;color:var(--txt)}
-#view-memory .reason-box .rrow p{margin:0;font-size:12px;line-height:1.7;color:var(--txt-3)}
-#tb-mem tr[data-code],#tb-memdays tr[data-date]{cursor:pointer}
-#tb-memdays tr[data-date]:hover td{background:var(--nav-hover)}
-
-/* ---------------- 设置 ---------------- */
-/* 用网格（不用多列瀑布流）：设置项是按 ①→⑧ 编号读的，瀑布流是竖着排，
-   会把编号顺序打乱。矮卡片下面的空隙由同排高卡片撑住，可接受 */
-.set-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px 10px;align-items:start}
-.set-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:13px 12px 12px}
-/* 卡片底部的补充说明，用来把矮卡片填满、顺便讲清这一关在干什么 */
-.set-card .sc-note{margin:9px 0 0;padding-top:8px;border-top:1px dashed var(--mi-line);
-  font-size:11px;line-height:1.65;color:var(--txt-3)}
-.set-card .sc-note b{color:var(--txt-2);font-weight:400}
-.set-card h3{margin:0 0 10px;font-size:12.5px;display:flex;align-items:center;gap:7px;color:var(--txt)}
-.set-card h3 em{font-style:normal;font-size:10px;color:var(--accent-2);background:rgba(47,139,255,.12);
-  padding:1px 6px;border-radius:4px;font-family:var(--mono)}
-.frow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--mi-line)}
-.frow:last-child{border-bottom:0}
-.frow label{font-size:12px;color:var(--txt-2);display:flex;flex-direction:column;gap:1px}
-.frow label small{font-size:10.5px;color:var(--txt-3)}
-.frow input[type=number]{width:88px;text-align:right;font-family:var(--mono)}
-.frow input[type=text]{width:110px;text-align:right;font-family:var(--mono)}
-.frow input[type=range]{width:110px}
-.frow select{min-width:110px}
-/* ---- 选股方案（策略插件）：下拉 + 说明 + 关卡标签 + 两个操作按钮 ---- */
-.strat-desc{margin:2px 0 0;font-size:11.5px;color:var(--txt-3);line-height:1.5}
-.strat-gates{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
-.sgat{
-  display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;cursor:help;
-  font-size:11px;color:var(--txt-2);background:var(--nav-hover);
-  border:1px solid var(--line);white-space:nowrap;
-}
-.strat-ops{gap:8px;justify-content:flex-start;flex-wrap:wrap;padding-top:8px;border-bottom:0}
-.strat-ops button{flex:0 0 auto}
-.toggle{position:relative;width:34px;height:19px;border-radius:10px;background:var(--ctrl);cursor:pointer;transition:.2s;border:0}
-.toggle::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
-  background:var(--toggle-off);transition:.2s}
-.toggle.on{background:rgba(47,214,165,.25)}
-.toggle.on::after{left:17px;background:var(--ok)}
-
-/* ---------------- 抽屉 ---------------- */
-.drawer-mask{position:fixed;inset:0;background:rgba(4,7,11,.55);opacity:0;pointer-events:none;
-  transition:opacity .2s;z-index:54;backdrop-filter:blur(2px)}
-.drawer-mask.show{opacity:1;pointer-events:auto}
-/* 亮暗切换：在侧边栏左下角，整行按钮 + 中文名字，别再塞进右上角的小圆点 */
-.theme-btn{
-  display:flex;align-items:center;gap:8px;width:100%;height:30px;margin-top:6px;
-  padding:0 9px;border-radius:7px;cursor:pointer;font-size:12.5px;
-  border:1px solid var(--line);background:var(--panel-2);color:var(--txt-2);
-  font-family:inherit;text-align:left;transition:.15s;
-}
-.theme-btn:hover{color:var(--accent);border-color:var(--btn-hover-line);background:var(--btn-hover-bg)}
-.theme-btn i{width:14px;height:14px;flex:0 0 14px;display:grid;place-items:center}
-.theme-btn svg{width:14px;height:14px;display:block}
-.theme-btn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.drawer{
-  position:fixed;top:0;right:0;bottom:0;width:min(760px,94vw);background:var(--bg-2);
-  border-left:1px solid var(--line);transform:translateX(calc(100% + 60px));transition:transform .26s cubic-bezier(.4,0,.2,1);
-  /* translateX(calc(100% + 60px))：位移要多出 60px，把左缘的投影也带出屏外；
-     之前写 102%，抽屉宽的时候 2% 不足 60px，投影会露出一条竖影在屏右缘 */
-  z-index:55;display:flex;flex-direction:column;box-shadow:var(--shadow);
-}
-.drawer.show{transform:translateX(0)}
-.dw-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
-.dw-title{display:flex;align-items:baseline;gap:8px;font-size:15px;font-weight:700}
-.dw-title em{font-style:normal;font-family:var(--mono);font-size:12px;color:var(--txt-3);font-weight:400}
-.dw-sub{display:flex;gap:10px;align-items:baseline;margin-top:3px;font-size:12px;color:var(--txt-2)}
-.dw-sub b{font-size:17px;font-family:var(--mono)}
-/* 抽屉里"买 / 卖 / 买多少"这几行是密集说明文，行高给足，否则挤成一坨 */
-.dw-body{overflow:auto;padding:12px 16px 24px;display:flex;flex-direction:column;gap:10px}
-.dw-sec{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:11px 12px;line-height:1.62}
-.dw-sec h4{margin:0 0 9px;font-size:12px;color:var(--txt-2);font-weight:600;display:flex;align-items:center;gap:8px}
-.dw-sec h4 .spacer{flex:1}
-.mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
-.mi{background:var(--mi-bg);border:1px solid var(--mi-line);border-radius:8px;padding:7px 9px}
-.mi .k{font-size:10.5px;color:var(--txt-3)}
-.mi .v{font-size:14.5px;font-family:var(--mono);margin-top:2px;font-weight:600}
-.days{display:flex;flex-direction:column;gap:5px;margin-top:8px}
-.drow{display:flex;align-items:center;gap:6px;font-size:11.5px;font-family:var(--mono);white-space:nowrap}
-.drow .dt{color:var(--txt-3);width:46px;flex:0 0 46px}
-.drow .dv{flex:1 1 auto;color:var(--txt-2)}
-.drow .dp{flex:0 0 76px;text-align:right}
-.drow .ok{color:var(--ok)} .drow .no{color:var(--bad)}
-.hintline{font-size:11px;color:var(--txt-3);margin-top:7px;line-height:1.6}
-.kline{width:100%;display:block;border-radius:8px;background:var(--chart-bg)}
-.tabs{display:flex;gap:4px}
-.tab{border:0;background:transparent;color:var(--txt-3);font-size:11.5px;padding:3px 9px;border-radius:6px;cursor:pointer}
-.tab.active{background:rgba(47,139,255,.14);color:var(--tab-on-txt)}
-
-/* ---------------- 走势图工具条 + 悬停气泡 ----------------
-   周期和指标分成两行：上面一排是「看哪段」，下面一排是「看什么」，别混成一行挤在一起。 */
-.ksec .k-hint{font-size:10.5px}
-.kbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0 7px}
-.kbar .tabs{background:rgba(127,127,127,.08);border-radius:8px;padding:2px;gap:2px}
-.k-ovs,.k-sub{display:flex;gap:4px}
-.k-ovs{margin-left:auto}
-.ktog{
-  border:1px solid var(--line);background:transparent;color:var(--txt-3);
-  font-size:10.5px;line-height:1.5;padding:1px 7px;border-radius:5px;cursor:pointer;
-  transition:.15s;font-family:inherit;
-}
-.ktog:hover{color:var(--txt);border-color:var(--line2)}
-.ktog.on{color:var(--txt);border-color:rgba(47,139,255,.5);background:rgba(47,139,255,.14)}
-.ksec .kline{cursor:crosshair}
-.k-tip{
-  position:fixed;z-index:90;pointer-events:none;min-width:172px;
-  background:var(--toast-bg);border:1px solid var(--toast-line);border-radius:9px;
-  padding:7px 9px;font-size:11px;color:var(--txt-2);box-shadow:var(--shadow);
-  font-family:var(--mono);line-height:1.55;
-}
-.k-tip .tt{color:var(--txt);font-size:11.5px;margin-bottom:4px;display:flex;justify-content:space-between;gap:10px}
-.k-tip .tt em{font-style:normal;color:var(--txt-3);font-size:10px}
-.k-tip .tg2{display:flex;gap:12px}
-.k-tip .tr{display:flex;gap:5px;white-space:nowrap}
-.k-tip .tr i{font-style:normal;color:var(--txt-3);min-width:32px}
-.k-tip .tr b{font-weight:500;color:var(--txt)}
-.k-tip .up{color:var(--up)} .k-tip .down{color:var(--down)}
-.k-tip .ts{margin-top:3px;color:var(--txt-3);font-size:10px}
-.htbl{width:100%;border-collapse:collapse;font-size:11.5px}
-.htbl th{color:var(--txt-3);font-weight:500;text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
-.htbl td{padding:4px 6px;border-bottom:1px solid var(--htbl-line);font-family:var(--mono)}
-.htbl th.num,.htbl td.num{text-align:right}
-
-/* ---------------- Toast ---------------- */
-.toast{
-  position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
-  background:var(--toast-bg);border:1px solid var(--toast-line);color:var(--txt);padding:8px 16px;border-radius:9px;
-  font-size:12.5px;box-shadow:var(--shadow);transition:.22s;z-index:60;max-width:70vw;
-}
-.toast.show{opacity:1;transform:translate(-50%,0)}
-.toast.err{border-color:rgba(255,95,109,.5);background:var(--toast-err-bg)}
-
-/* ---------------- 买点卖点提醒：右下角排队的小卡片 ----------------
-   放右上角会压住顶栏的「自动选股 正在跑…」和工具条上的「开始选股」，
-   换个位置：右下角一直是空的，不挡任何按钮。 */
-.alerts{
-  position:fixed;bottom:26px;right:14px;z-index:70;display:flex;flex-direction:column;gap:8px;
-  width:322px;max-width:calc(100vw - 28px);pointer-events:none;
-}
-.alerts:empty{display:none}
-/* 抽屉/大弹窗开着时让路：提醒卡 z=70 高于抽屉(55)，会盖住抽屉内容，
-   卡片上的 pointer-events:auto 还会把点击吃掉。 */
-body.ovl-open .alerts{display:none}
-.alert{
-  pointer-events:auto;position:relative;overflow:hidden;
-  background:var(--panel-2);border:1px solid var(--line-2);border-left-width:3px;border-radius:10px;
-  box-shadow:var(--shadow);padding:9px 11px 10px;
-  opacity:0;transform:translateX(18px);
-  transition:opacity .2s ease-out,transform .2s ease-out;
-}
-.alert.in{opacity:1;transform:none}
-.alert.out{animation:al-out .2s ease-in forwards}
-@keyframes al-in{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
-@keyframes al-out{to{opacity:0;transform:translateX(18px)}}
-/* 买 = 红、卖 = 绿，跟 A 股涨跌的颜色一致，看一眼边框就知道是哪一种 */
-.alert.buy{border-left-color:var(--up)}
-.alert.sell{border-left-color:var(--down)}
-.al-hd{display:flex;align-items:baseline;gap:7px;font-size:11.5px}
-.al-tag{font-size:10.5px;padding:1px 6px;border-radius:5px;font-weight:600}
-.alert.buy .al-tag{color:var(--up);background:rgba(255,77,94,.13);border:1px solid rgba(255,77,94,.3)}
-.alert.sell .al-tag{color:var(--down);background:rgba(18,196,139,.12);border:1px solid rgba(18,196,139,.3)}
-html[data-theme="light"] .alert.buy .al-tag{background:rgba(214,40,60,.09)}
-html[data-theme="light"] .alert.sell .al-tag{background:rgba(10,150,110,.09)}
-.al-code{font-family:var(--mono);color:var(--txt-3);font-size:11px}
-.al-time{margin-left:auto;padding-right:20px;color:var(--txt-3);font-size:10.5px;font-family:var(--mono)}
-.al-name{font-size:13px;font-weight:600;margin-top:3px;color:var(--txt);padding-right:18px}
-.al-msg{font-size:11.5px;color:var(--txt-2);margin-top:2px;line-height:1.45}
-.al-nums{display:flex;gap:12px;margin-top:5px;font-size:11.5px;color:var(--txt-3);white-space:nowrap}
-.al-nums b{font-family:var(--mono);font-size:12.5px;color:var(--txt);font-weight:700;margin-left:3px}
-.al-nums b.rise{color:var(--up)}
-.al-nums b.fall{color:var(--down)}
-.al-x{
-  position:absolute;top:5px;right:6px;border:0;background:transparent;color:var(--txt-3);
-  cursor:pointer;font-size:13px;line-height:1;padding:3px 4px;border-radius:4px;
-}
-.al-x:hover{color:var(--txt);background:var(--nav-hover)}
-
-.spin{width:13px;height:13px;border:2px solid color-mix(in srgb,var(--txt) 25%,transparent);border-top-color:currentColor;
-  border-radius:50%;display:inline-block;animation:sp .7s linear infinite}
-@keyframes sp{to{transform:rotate(360deg)}}
-
-@media (max-width:1180px){
-  .side{width:64px;flex-basis:64px;padding:12px 8px}
-  .bname,.bsub,.ni span,.side-foot .stat-line{display:none}
-  .ni{justify-content:center;padding:0}
-  .nav .ni.sub:first-of-type::before{display:none}
-  .brand{justify-content:center;border-bottom:0;padding-bottom:0}
-  /* 窄屏下侧边栏只剩图标：亮暗按钮也收成图标，但仍然留在左下角 */
-  .side-foot{border-top:1px solid var(--line);padding-top:10px}
-  .theme-btn{justify-content:center;padding:0;margin-top:0}
-  .theme-btn span{display:none}
-}
-@media (max-width:860px){ .row2{grid-template-columns:1fr} }
-
-/* ---------- 组合账户 ---------- */
-.pf-notes{margin-top:2px;padding-top:8px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--txt-2)}
-.pf-notes b{color:var(--txt);font-family:var(--mono)}
-.pf-notes .hintline{border:0;padding:0;margin:0;font-size:11.5px;line-height:1.55;color:var(--txt-3)}
-
-/* ---------- 技术指标标签 ---------- */
-.tat-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-.tat{font-size:11.5px;padding:2px 8px;border-radius:6px;background:var(--eq-bg);color:var(--accent-soft);border:1px solid var(--line)}
-
-/* ---------------- 「值得盯着」：主页行卡片 + 全名单弹窗 ---------------- */
-/* 主页只放"差一点"的几只，是路过提示；要看全名单点「全部展开」进弹窗 */
-.wlist{display:flex;flex-direction:column;overflow:auto;max-height:264px}
-.wlist.wl-full{max-height:none;overflow:visible;padding:10px 12px;gap:6px}
-.wrow{
-  --wcols:26px minmax(180px,1.4fr) 96px 74px minmax(150px,1.1fr) auto minmax(90px,.8fr) 62px;
-  display:grid;grid-template-columns:var(--wcols);
-  align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--row-line);
-  cursor:pointer;transition:background .12s;font-size:12px;
-}
-.wlist.wl-full .wrow{
-  --wcols:26px minmax(230px,1.6fr) 108px 82px minmax(150px,1.1fr) auto minmax(170px,1.3fr) 66px 56px;
-  border:1px solid var(--line);border-radius:9px;background:var(--panel-2);padding:9px 12px;
-}
-.wrow:hover,.wrow:focus-visible{background:var(--row-hover);outline:none}
-.wrow:last-child{border-bottom:0}
-.wlist.wl-full .wrow:last-child{border-bottom:1px solid var(--line)}
-.wrow.near{box-shadow:inset 2px 0 0 var(--ok)}
-.wlist.wl-full .wrow.near{box-shadow:inset 2px 0 0 var(--ok)}
-.wr-rank{color:var(--txt-3);font-family:var(--mono);font-size:11px;text-align:right}
-.wr-main{display:flex;align-items:baseline;gap:7px;min-width:0;flex-wrap:nowrap}
-.wr-name{font-weight:600;font-size:12.5px;white-space:nowrap;flex:0 0 auto}
-.wr-code{font-family:var(--mono);font-size:11px;color:var(--txt-3)}
-.wr-price{font-family:var(--mono);font-size:12px;white-space:nowrap}
-.wr-price em{font-style:normal;font-size:10.5px;opacity:.85;margin-left:3px}
-.wr-score .score{min-width:64px}
-.wr-streak{display:flex;align-items:center}
-.wr-nums{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11px;color:var(--txt-3)}
-.wr-nums b{font-family:var(--mono);font-weight:600;color:var(--txt-2)}
-.wr-why{font-size:11px;color:var(--warn);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wlist.wl-full .wr-why{white-space:normal;line-height:1.45}
-.wr-gap{
-  font-size:10.5px;padding:1px 7px;border-radius:5px;white-space:nowrap;justify-self:end;
-  background:var(--slug-bg);color:var(--txt-3);border:1px solid var(--line);
-}
-.wr-gap.warn{background:rgba(47,214,165,.13);color:var(--ok);border-color:rgba(47,214,165,.3)}
-/* ---------------- 自选股（盯盘页里那一块） ----------------
-   一行一只：谁 / 现价涨跌 / 五关打勾 / 把握度 / 该买该卖 / 止损目标 / 按钮 */
-.wl{display:flex;flex-direction:column;max-height:calc(100vh - 420px);min-height:150px;overflow:auto}
-/* 输入框下面的候选：点一个就加进自选 */
-.whints{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 10px}
-.whints[hidden]{display:none}
-.wh{border:1px solid var(--line-2);background:var(--panel-2);color:var(--txt);border-radius:7px;
-  padding:4px 9px;font-size:12px;cursor:pointer;font-family:inherit}
-.wh em{font-style:normal;color:var(--txt-3);margin-left:6px;font-size:11px}
-.wh:hover{border-color:var(--btn-hover-line);background:var(--btn-hover-bg)}
-/* 这里的 5 个勾只画「五关」（站上成本 / 筹码 / 位置 / 结构 / 趋势），
-   和弹窗里数「差几关」是同一套。后端多给的 close_ma / tail 不是关，不画，
-   不然一行五个勾里会有两个是常亮的，看着像"过了两关"。 */
-.wl .wrow{
-  display:grid;align-items:center;gap:10px;padding:8px 12px;
-  grid-template-columns:minmax(120px,1.2fr) 88px 110px 86px minmax(140px,1fr) 128px auto;
-  border-bottom:1px solid var(--line);font-size:12px;transition:background .12s;
-}
-.wl .wrow:hover{background:var(--row-hover)}
-.wl .wrow:last-child{border-bottom:0}
-.wl .wr-id{display:flex;align-items:baseline;gap:7px;min-width:0}
-.wl .wr-id b{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wl .code{font-family:var(--mono);font-size:11px;color:var(--txt-3)}
-.wl .wr-px{display:flex;flex-direction:column;gap:1px;font-family:var(--mono);white-space:nowrap}
-.wl .wr-px b{font-size:12.5px;font-weight:600}
-.wl .wr-px span{font-size:10.5px}
-.wl .wr-chk{display:flex;gap:3px}
-/* 五关的勾和叉：过 = 绿勾，没过 = 暗叉，一眼能数出差几个 */
-.wl .ck{font-style:normal;width:15px;text-align:center;font-size:11px;line-height:1}
-.wl .ck.no{color:var(--txt-3);opacity:.55}
-.wl .ck.yes{color:var(--ok)}
-.wl .wr-score{color:var(--txt-3);font-size:11px;white-space:nowrap}
-.wl .wr-score b{font-family:var(--mono);font-size:12.5px;color:var(--txt);font-weight:700}
-.wl .wr-verdict{display:flex;align-items:center;gap:6px;min-width:0}
-.wl .wv{font-size:11px;padding:1px 7px;border-radius:5px;white-space:nowrap;border:1px solid transparent}
-.wl .wv.buy{color:var(--up);background:rgba(255,77,94,.12);border-color:rgba(255,77,94,.28)}
-.wl .wv.sell{color:var(--down);background:rgba(18,196,139,.11);border-color:rgba(18,196,139,.28)}
-.wl .wv.none{color:var(--txt-3);background:var(--panel-2);border-color:var(--line-2)}
-.wl .wv-at{font-style:normal;font-size:10.5px;color:var(--txt-3);font-family:var(--mono)}
-.wl .wr-plan{display:flex;flex-direction:column;gap:1px;font-size:10.5px;color:var(--txt-3);font-family:var(--mono);white-space:nowrap}
-.wl .wr-act{display:flex;gap:4px;justify-self:end}
-.wl-empty{padding:22px 12px;text-align:center;font-size:12px;color:var(--txt-3)}
-.star{min-width:26px;padding:0 6px;font-size:13px;line-height:1}
-.wl .wrow.hit-buy{box-shadow:inset 2px 0 0 var(--up);background:rgba(255,77,94,.05)}
-.wl .wrow.hit-sell{box-shadow:inset 2px 0 0 var(--down);background:rgba(18,196,139,.05)}
-html[data-theme="light"] .wl .wv.buy{background:rgba(214,40,60,.08)}
-html[data-theme="light"] .wl .wv.sell{background:rgba(10,150,110,.08)}
-
-.wempty{padding:22px;text-align:center;color:var(--txt-3);font-size:12px}
-
-/* 弹窗：比侧栏抽屉更像"摊开看"的一张桌面，宽度跟着屏幕走 */
-.modal-mask{position:fixed;inset:0;background:rgba(4,7,11,.6);opacity:0;pointer-events:none;
-  transition:opacity .18s;z-index:50;backdrop-filter:blur(3px)}
-.modal-mask.show{opacity:1;pointer-events:auto}
-.modal{
-  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.985);opacity:0;pointer-events:none;
-  width:min(1180px,94vw);max-height:88vh;background:var(--bg-2);border:1px solid var(--line-2);
-  border-radius:14px;box-shadow:var(--shadow);z-index:51;display:flex;flex-direction:column;overflow:hidden;
-  transition:opacity .18s,transform .18s;
-}
-.modal:not([hidden]){opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
-.modal[hidden]{display:none}
-.mh{display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line);flex:0 0 auto}
-.mh-main{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1 1 auto;overflow:hidden}
-.mh-main b{font-size:14px;white-space:nowrap;flex:0 0 auto}
-.mh-main .muted{font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mh-tools{margin-left:auto;display:flex;align-items:center;gap:8px;flex:0 0 auto}
-.mb{overflow:auto;flex:1 1 auto;min-height:0;background:var(--bg);padding:12px 14px}
-.mf{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--line);font-size:11.5px;flex:0 0 auto}
-/* ---------------- 二级弹窗：把一块内容摊开成一屏 ----------------
-   和「值得盯着」那个弹窗同一套皮，但更宽（屏幕多宽用多宽），因为里面装的是表格 */
-.modal.pm{width:min(1360px,96vw);max-height:92vh;z-index:56}
-#pm-mask{z-index:56}
-/* 页签单独占一行：9 个页签塞进 .mh 会把标题挤成一行一个字 */
-.pm-tabbar{flex:0 0 auto;padding:7px 14px 8px;background:var(--bg-2);border-bottom:1px solid var(--line);overflow:hidden;
-  display:flex;align-items:center;gap:8px}
-.pm-tabbar[hidden]{display:none}
-.pm-tabbar .seg{display:flex;gap:6px;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:thin;
-  background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:3px}
-.pm-tabbar .seg[hidden]{display:none}
-.pm-tabbar .seg button{flex:0 0 auto;white-space:nowrap;height:26px;padding:0 11px;font-size:12.5px;border-radius:6px}
-.pm-tabbar .seg button.on{background:var(--accent);color:#fff}
-/* 标题永远一行，放不下就用省略号，别让页签把它压成竖排 */
-#pm-title{white-space:nowrap;flex:0 0 auto}
-#pm-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-#pm-body{display:flex;flex-direction:column;gap:10px;padding:12px 14px}
-#pm-body > .tablewrap{max-height:none}
-#pm-body > .pm-panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-#pm-body > .pm-panel > .ph{padding:9px 12px;border-bottom:1px solid var(--line)}
-#pm-body > .pm-panel > .cv{height:auto}
-#pm-body > .pm-panel > .kpis{padding:10px 12px}
-#pm-body .pm-tw{max-height:none;overflow:auto}
-#pm-body .pm-row2{display:grid;grid-template-columns:1.5fr 1fr;gap:10px;align-items:start}
-#pm-body .pm-meth{padding:2px 4px 6px}
-#pm-body .wlist.wl-full{max-height:none}
-#pm-body .pm-set .set-card{background:transparent;border:0;border-radius:0;padding:0}
-#pm-body .pm-set .set-card.dirty{box-shadow:none}
-#pm-body .pm-set .frow input[type=number]{width:140px}
-#pm-body .pm-set .set-card h3{margin-bottom:6px}
-/* 弹窗里的自选股行：地方大，就不按卡片三段堆了，一行排开 */
-#pm-body .wl{max-height:none;min-height:0}
-#pm-save{display:inline-flex;align-items:center;gap:5px}
-#pm-save[hidden]{display:none}
-#pm-tabs[hidden]{display:none}
-#pm-foot:empty{display:none}
-/* 参数卡片：主页上只放常用的几项，剩下的进弹窗 */
-.set-card.dirty{box-shadow:inset 3px 0 0 var(--accent-2);border-color:var(--accent-2)}
-.set-card h3 .set-open{margin-left:auto;height:24px;padding:0 8px;font-size:11px}
-.set-more{margin-top:8px;width:100%;height:26px;border:1px dashed var(--line-2);border-radius:7px;
-  background:transparent;color:var(--txt-3);font-size:11.5px;font-family:inherit;cursor:pointer}
-.set-more:hover{color:var(--txt);border-color:var(--btn-hover-line);background:var(--btn-hover-bg)}
-.set-tip{margin-top:10px;font-size:11.5px}
-/* 「全部 / 在整屏里看」那个小按钮：别抢戏，但要看得见 */
-.btn.ghost em{font-style:normal;opacity:.75;margin-left:3px}
-.kpis-more{display:flex;justify-content:flex-end;margin:-4px 0 2px}
-.kpis-more .btn{height:24px;font-size:11.5px}
-@media (max-width:860px){
-  #pm-body .pm-row2{grid-template-columns:1fr}
-  .modal.pm{width:97vw}
-}
-#wm-filter button{height:26px;padding:0 10px;font-size:11.5px}
-@media (max-width:1180px){
-  /* 主页窄栏：中间三列统计和"还差什么"收起来，只留能一眼扫的名称 / 把握度 / 五关 / 差距 */
-  .wrow{grid-template-columns:24px minmax(150px,1.4fr) 88px 70px auto 58px;gap:8px}
-  .wrow .wr-nums,.wrow .wr-why{display:none}
-  /* 弹窗窄一点时全字段都留，但按优先级分配宽度：
-     名称那列给足、右侧三个小列定宽，别让 auto 列把名字挤成一字一行 */
-  .wlist.wl-full .wrow{
-    grid-template-columns:20px minmax(130px,1.2fr) minmax(72px,88px) minmax(60px,72px) minmax(96px,1fr) 74px 54px 46px;
-    grid-template-areas:
-      "rank name score streak nums checks gap act"
-      "rank why  why   why    why   why   why why";
-    gap:6px 8px;padding:9px 10px;
-  }
-  .wlist.wl-full .wrow .wr-nums{display:flex}
-  .wlist.wl-full .wrow .wr-name{white-space:nowrap}
-  .wlist.wl-full .wrow .wr-main{grid-area:name}
-  .wlist.wl-full .wrow .wr-rank{grid-area:rank;align-self:start;margin-top:2px}
-  .wlist.wl-full .wrow .wr-score{grid-area:score}
-  .wlist.wl-full .wrow .wr-streak{grid-area:streak}
-  .wlist.wl-full .wrow .wr-nums{grid-area:nums}
-  .wlist.wl-full .wrow .checks{grid-area:checks}
-  .wlist.wl-full .wrow .wr-gap{grid-area:gap}
-  .wlist.wl-full .wrow .wr-act{grid-area:act}
-  .wlist.wl-full .wrow .wr-why{grid-area:why;white-space:normal;line-height:1.4;margin-top:-2px}
-  .wlist.wl-full .wrow .wr-main{flex-wrap:wrap}
-  .modal{width:96vw;max-height:90vh}
+.pick .px i{
+  font-style:normal; font-size:11px; color:var(--ink3);
+  font-weight:400; margin-left:4px;
 }
 
-
-
-/* ---- 参数页的「锁定」横幅 ---- */
-.param-lock{
-  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-  padding:12px 16px;border-radius:12px;margin-bottom:14px;font-size:13px;
-  background:var(--mi-bg);border:1px solid var(--line);
+/* ---------- 三、历史 ---------- */
+.hist{
+  border-top:1px solid var(--line); padding-top:24px;
+  margin-top:30px;
 }
-.param-lock b{color:var(--txt)}
-.param-lock span{color:var(--txt-2);flex:1;min-width:200px}
-.param-lock.on{background:rgba(74,222,128,.08);border-color:rgba(74,222,128,.28)}
-.param-lock.off{background:rgba(251,191,36,.08);border-color:rgba(251,191,36,.28)}
+.hist canvas{width:100%; height:150px; display:block}
+.facts{
+  margin-top:14px; display:flex; gap:22px;
+  font-size:12px; color:var(--ink3); font-variant-numeric:tabular-nums;
+  flex-wrap:wrap;
+}
+.facts b{
+  display:block; font-size:15px; color:var(--ink2);
+  font-weight:600; margin-bottom:1px;
+}
 
-/* ---- 规则一览（方法页）----
-   一行一条规则：编号 / 名称 / 阈值 / 状态。详细解释放进 title（hover 才出），
-   不占据面板空间 —— 想看的人悬停就能看到，不想看的人不用滚动。 */
-.rules{display:flex;flex-direction:column;padding:2px 16px 6px}
-/* 使用说明里的补充说明行：紧跟在规则列表下面，别再套一层卡片 */
-.meth-note{padding:2px 18px 12px;font-size:12.5px;line-height:1.8;color:var(--txt-3)}
-.meth-note b{color:var(--txt-2);font-weight:600}
-.rule{display:grid;grid-template-columns:26px minmax(130px,auto) 1fr auto;
-  gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line-2)}
-.rule:last-child{border-bottom:0}
-.rule b{font-size:13px;color:var(--txt-3);text-align:center;font-weight:600}
-.rule .ru-t{font-size:14px;color:var(--txt);font-weight:600}
-.rule code{font-size:12.5px;color:var(--txt-2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.rule i{font-style:normal;font-size:11px;padding:2px 9px;border-radius:999px;white-space:nowrap}
-.rule i.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
-.rule i.off{color:var(--txt-3);background:var(--mi-bg)}
-.rules-foot{display:flex;align-items:center;gap:10px;padding:14px 20px;margin-top:4px;border-top:1px solid var(--line-2)}
+footer{
+  margin-top:22px; font-size:11px; color:var(--ink3);
+  display:flex; justify-content:space-between; letter-spacing:.3px;
+}
+
+/* ---------- 窄屏 ---------- */
+@media (max-width:380px){
+  .vs b{font-size:58px}
+  .picks{grid-template-columns:1fr}
+  .pick .nm{font-size:17px}
+}
+
+/* 首屏进入时轻微上浮，不做花哨动画：这页面一年只打开几次 */
+@media (prefers-reduced-motion:no-preference){
+  .hero,.picks,.hist{animation:in .45s cubic-bezier(.22,.7,.3,1) both}
+  .picks{animation-delay:.06s}
+  .hist{animation-delay:.12s}
+  @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+}
