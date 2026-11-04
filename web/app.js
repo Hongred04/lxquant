@@ -106,8 +106,8 @@ function renderDecision(f) {
   const hint = $('#hint');
   if (on) {
     hint.className = 'hint on';
-    hint.innerHTML = `已跌破 <b>−${gate}%</b>，在进场窗口内。`
-      + `按规则买下面两只、各一半，拿满 <b>${f.hold_days} 个交易日</b>。`;
+    hint.innerHTML = `已跌破 <b>−${gate}%</b>，可以买。两只各一半，拿满 `
+      + `<b>${f.hold_days} 天</b>；中途跌破 <b>${f.stop_pct}%</b> 先卖。`;
   } else {
     // 用后端算好的 gap，不要在界面上重算：从均线上方跌下来时
     // 「还差多少」= v + gate，用 gate - |v| 会把 3.2 算成 0.8。
@@ -212,7 +212,7 @@ function renderPos(p) {
     $('#pos-sub').textContent = '';
     box.innerHTML = `
       <div class="pos-empty">
-        <span>买了就在这记一笔，之后每天能看到第几天、还剩几天、赚了多少。</span>
+        <span>买了就在这记一笔。到期或跌破 ${(S.fin && S.fin.stop_pct) || 8}% 时会提醒你卖。</span>
         <button class="btn primary" id="btn-open">记一笔买入</button>
       </div>`;
     $('#btn-open').onclick = openPos;
@@ -220,9 +220,12 @@ function renderPos(p) {
   }
 
   const cls = dir(a.ret);
-  // 持仓状态比空状态多出四行内容，左栏一长整页就要滚 —— 所以这里刻意压成
-  // 两行文字 + 一条进度 + 一行两只票，不写「第几天」和「还剩几天」各占一行。
-  $('#pos-sub').textContent = a.due ? '已到期待卖' : `已拿 ${a.held} / ${HOLD} 天`;
+  // 止损优先于到期：跌破买入价 8% 的当天就该走，不必等到第 40 天。
+  // 这是回测里唯一一个在所有测试下都改善结果的规则（最差单笔 -24% → -17%）。
+  const stop = (S.fin && S.fin.stop_pct) || 8;
+  const hitStop = a.ret <= -stop;
+  $('#pos-sub').textContent = hitStop ? '该止损了'
+    : (a.due ? '已到期待卖' : `已拿 ${a.held} / ${HOLD} 天`);
 
   box.innerHTML = `
     <div class="pos-row">
@@ -240,7 +243,8 @@ function renderPos(p) {
         </div>`).join('')}
     </div>
     <div style="margin-top:9px">
-      <button class="btn" id="btn-close">${a.due ? '到期了，平掉这笔' : '提前卖出，平掉这笔'}</button>
+      <button class="btn${hitStop ? ' danger' : ''}" id="btn-close">${
+        hitStop ? `跌破 -${stop}%，该卖了` : (a.due ? '到期了，平掉这笔' : '提前卖出，平掉这笔')}</button>
     </div>`;
 
   $('#btn-close').onclick = closePos;

@@ -10,7 +10,7 @@
 规则（参数写死，不给调 —— 给的旋钮越多，越容易用过拟合的参数骗自己）：
     进场：上证指数相对 20 日均线跌幅 > GATE
     选股：银行里避差分最高的 1 只 + 保险里最高的 1 只
-    持有：HOLD_DAYS 天后全部卖出，中途不看
+    卖出：HOLD_DAYS 天后全部卖出，或者提前跌破买入价 STOP_PCT% 就砍（先到先执行）
     仓位：各一半
 
 避差分（和 factor_lab 里验证过的一致，不能改方向）：
@@ -31,10 +31,11 @@ from .config import DATA_DIR
 
 GATE = 2.0                  # 上证相对 MA20 跌幅超过 2% 才买
 HOLD_DAYS = 40              # 持有 40 天后卖
+STOP_PCT = 8.0              # 或：收盘价跌破买入价 8% 就卖（先到先执行）
 QUOTA = (("银行", 1), ("保险", 1))   # 买 1 银行 + 1 保险
 
 CACHE = DATA_DIR / "fin_state.json"
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 # 大金融池：按板块分组，板块内按代码排序（顺序固定，方便分位复现）
 POOL = {
@@ -200,6 +201,13 @@ def build() -> dict:
     t0 = time.time()
     day = _probe()
 
+    # 指数先算：它的最新收盘日决定「个股缓存算不算新」。
+    # 收盘后个股缓存可能还停在盘中那根（被 _drop_unclosed 丢掉），
+    # 于是指数已经到 11-04、信号还停在 11-03 —— 用户会以为软件没更新。
+    ix_close = _index_close()
+    ix_last = str(ix_close.index[-1])[:10]
+    refetch = 0
+
     # ---- 1. 逐只算因子 ----
     raw = {}          # code -> (ma60, std20, corr20)
     meta = {}         # code -> (name, board)
@@ -211,6 +219,10 @@ def build() -> dict:
             try:
                 df = store.get_kline(code, "day", 120)
                 df = _drop_unclosed(df)
+                # 落后于指数就强制重拉一次（每天收盘后第一次会走这里，其余时间命中缓存）
+                if df is not None and len(df) and str(df["date"].iloc[-1])[:10] < ix_last:
+                    df = _drop_unclosed(store.get_kline(code, "day", 120, force=True))
+                    refetch += 1
                 if df is None or len(df) < 40:
                     failed += 1
                     continue
@@ -253,10 +265,8 @@ def build() -> dict:
             score[c] = float(v)
 
     # ---- 3. 择时 ----
-    # 用 _index_close()：长表打底（10.8 年）+ 新浪补最新 + 裁掉未收盘的那根。
-    # 原来直接调 index_daily，盘中拿到的是「今天还没收盘」的实时价，
-    # 而且只有 4.2 年 —— 前者让信号漂移，后者让回测缩水。
-    close = _index_close()
+    # 复用第 1 步算好的指数（长表打底 + 新浪补最新 + 裁掉未收盘）。
+    close = ix_close
     spot = float(close.iloc[-1])
     prev = float(close.iloc[-2]) if len(close) > 1 else spot
     ma20 = float(close.tail(20).mean())
@@ -296,6 +306,7 @@ def build() -> dict:
         "gate": GATE,
         "allow": bool(allow),
         "hold_days": HOLD_DAYS,
+        "stop_pct": STOP_PCT,
         "picks": picks,
         "market": {
             "spot": round(spot, 2),
@@ -315,6 +326,7 @@ def build() -> dict:
         },
         "scanned": len(raw),
         "failed": failed,
+        "refetch": refetch,
         "elapsed": round(time.time() - t0, 1),
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)

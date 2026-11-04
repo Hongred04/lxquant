@@ -216,6 +216,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
 .btn.primary:hover{filter:brightness(1.06)}
 .btn:disabled{opacity:.45; cursor:not-allowed}
+/* 该止损时的按钮：用红色描边而不是整块红 —— 是「该动手了」，不是「已经亏了」 */
+.btn.danger{border-color:var(--up); color:var(--up); background:var(--up-soft)}
 
 .pos-bar{
   height:5px; border-radius:3px; background:var(--line-2); overflow:hidden;
