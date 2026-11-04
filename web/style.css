@@ -292,6 +292,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .tablewrap{
   max-height:210px; overflow:auto; margin:0 -4px;
   scrollbar-width:thin;
+  /* 底部渐隐：容器高度不是行高的整数倍，最后一行一定被切一半。
+     硬切看着像渲染坏了，「淡出」才是滚动容器该有的暗示。 */
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 16px),transparent);
+  mask-image:linear-gradient(to bottom,#000 calc(100% - 16px),transparent);
 }
 .tablewrap::-webkit-scrollbar{width:6px}
 .tablewrap::-webkit-scrollbar-thumb{background:var(--line); border-radius:3px}
