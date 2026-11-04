@@ -1,200 +1,368 @@
-/* 大金融中长线 —— 一屏三块：偏离度、两只票、一条曲线。
-   没有任何导航、标语、说明段落：这三块之外的东西都是噪音。 */
+/* 大金融中长线 —— 一个策略、两个栏位、四块信息。
+   视觉参考 OpenBB / FreqUI 那类金融终端：细边框、低对比底色、数字等宽、
+   只让「涨跌」承担颜色，其余全部去色。 */
 
 :root{
-  --bg:#fafaf9; --card:#fff; --line:#e7e5e4;
-  --ink:#1c1917; --ink2:#78716c; --ink3:#a8a29e;
-  --blue:#2563eb; --blue-soft:#eff6ff;
-  --up:#dc2626; --down:#16a34a;   /* A 股：红涨绿跌 */
-  --r:14px;
+  --bg:#fbfbfa;
+  --surface:#ffffff;
+  --surface-2:#f6f6f4;
+  --line:#e8e6e2;
+  --line-2:#f0efec;
+  --ink:#18181b;
+  --ink-2:#6b6862;
+  --ink-3:#a3a09a;
+  --accent:#2563eb;
+  --accent-soft:#eff5ff;
+  --accent-line:#cfe0fb;
+  --up:#d92b2b;        /* A 股：红涨 */
+  --down:#12915e;      /* 绿跌 */
+  --up-soft:#fdf0f0;
+  --down-soft:#eefaf4;
+  --shadow:0 1px 2px rgba(24,24,27,.04), 0 1px 1px rgba(24,24,27,.02);
+  --r:11px;
+}
+
+html[data-theme="dark"]{
+  --bg:#0c0c0e;
+  --surface:#17171b;
+  --surface-2:#1e1e23;
+  --line:#2c2c33;
+  --line-2:#202024;
+  --ink:#f2f2f4;
+  --ink-2:#a5a3a0;
+  --ink-3:#6e6c69;
+  --accent:#4f8cff;
+  --accent-soft:#14213a;
+  --accent-line:#25395e;
+  --up:#f2555a;
+  --down:#2fbf7f;
+  --up-soft:#2a1518;
+  --down-soft:#0f241c;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
 }
 
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-/* [hidden] 必须真的隐藏：.boot 上的 display:flex 会盖掉浏览器默认的
-   display:none，加了 hidden 属性等于没加，整页被 60vh 的空白顶下去。 */
 [hidden]{display:none!important}
 
-html{height:100%}
+html,body{height:100%}
 body{
-  margin:0; min-height:100%; background:var(--bg); color:var(--ink);
-  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+  margin:0; background:var(--bg); color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
        "Hiragino Sans GB","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased;
-  display:flex; justify-content:center;
-}
-
-/* 布局的第一原则：**永远从顶部开始排**。
-   justify-content:center 在「内容比视口高」时会把溢出量对半分到上下两端 ——
-   顶部那半截被推到滚动区之外，滚动条拉回 0 也依然看不见（大数字被切一半、
-   footer 消失，就是这个问题）。只有高度真的富余时才允许居中。 */
-#app{
-  width:100%; max-width:560px; padding:24px 20px 24px;
-  display:flex; flex-direction:column;
-  /* 有富余就居中，装不下就从顶部开始排 —— 交给浏览器判断，
-     不要用媒体查询猜阈值：窄屏 + 矮屏组合下猜错一次就是整块内容被切掉。
-     不认 safe 关键字的浏览器只当这行不存在，退回上一行的 flex-start。 */
-  justify-content:flex-start;
-  justify-content:safe center;
-  min-height:100vh;
-}
-
-/* ---------- 启动态 ---------- */
-.boot{
-  flex:1; display:flex; align-items:center; justify-content:center;
-  color:var(--ink3); font-size:13px; letter-spacing:.3px;
-  min-height:40vh;
-}
-
-/* ---------- 一、偏离度 ---------- */
-.hero{
-  padding:4px 0 24px; text-align:center; flex:0 0 auto;
-}
-.vs{
-  display:flex; align-items:baseline; justify-content:center;
-  letter-spacing:-2px;
   font-variant-numeric:tabular-nums;
 }
-.vs b{
-  font-size:72px; font-weight:640; line-height:1.06; color:var(--ink);
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+/* ---------- 启动 ---------- */
+.boot{
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px;
+  color:var(--ink-3); font-size:12.5px; letter-spacing:.3px;
 }
-.vs i{
-  font-size:30px; font-weight:500; font-style:normal;
-  color:var(--ink3); margin-left:3px; letter-spacing:-1px;
+.boot-i{
+  width:18px; height:18px; border-radius:50%;
+  border:2px solid var(--line); border-top-color:var(--accent);
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- 外壳 ---------- */
+.app{
+  max-width:1440px; margin:0 auto; padding:0 20px 22px;
+  display:flex; flex-direction:column; min-height:100vh;
 }
 
-.vs-cap{
-  margin-top:8px; font-size:12.5px; color:var(--ink3); letter-spacing:.4px;
+/* ---------- 顶栏 ---------- */
+.bar{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:16px; padding:13px 2px; border-bottom:1px solid var(--line);
+  flex:0 0 auto;
+}
+.brand{display:flex; align-items:center; gap:11px; min-width:0}
+.logo{
+  width:26px; height:26px; border-radius:7px; flex:0 0 auto;
+  background:linear-gradient(145deg,var(--accent),#6aa2ff);
+  box-shadow:0 2px 6px rgba(37,99,235,.25); position:relative;
+}
+.logo:after{
+  content:""; position:absolute; left:7px; top:13px; width:12px; height:2px;
+  background:#fff; border-radius:1px;
+}
+.brand-t{min-width:0}
+.brand-t h1{
+  margin:0; font-size:14px; font-weight:650; letter-spacing:.1px;
+}
+.brand-t p{
+  margin:1px 0 0; font-size:11.5px; color:var(--ink-3);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
+.bar-r{display:flex; align-items:center; gap:14px; flex:0 0 auto}
+.mkt{display:flex; align-items:baseline; gap:7px}
+.mkt-k{font-size:11px; color:var(--ink-3)}
+.mkt b{font-size:14.5px; font-weight:640}
+.mkt-v{font-size:12px; font-weight:600}
+.stamp{font-size:11.5px; color:var(--ink-3); display:flex; gap:5px}
+.stamp b{color:var(--ink-2); font-weight:550}
+
+.icon-btn{
+  width:28px; height:28px; border-radius:7px; border:1px solid var(--line);
+  display:flex; align-items:center; justify-content:center;
+  color:var(--ink-2); background:var(--surface);
+  transition:background .15s,color .15s,border-color .15s;
+}
+.icon-btn:hover{color:var(--ink); background:var(--surface-2)}
+.icon-btn.spin svg{animation:spin .8s linear infinite}
+
+/* ---------- 栅格 ---------- */
+.grid{
+  display:grid; grid-template-columns:352px minmax(0,1fr);
+  gap:12px; margin-top:12px; align-items:start;
+  flex:1 1 auto;
+}
+.col{display:flex; flex-direction:column; gap:12px; min-width:0}
+
+/* ---------- 卡片 ---------- */
+.card{
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--r); padding:13px 14px 13px;
+  box-shadow:var(--shadow); flex:0 0 auto;
+}
+.card-h{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px; margin-bottom:12px;
+}
+.card-t{font-size:12px; font-weight:600; color:var(--ink-2); letter-spacing:.3px}
+.card-sub{font-size:11.5px; color:var(--ink-3)}
+
+/* ---------- 进场信号 ---------- */
 .verdict{
-  margin-top:22px;
-  display:inline-flex; align-items:center; gap:9px;
-  padding:9px 20px; border-radius:100px;
-  font-size:16px; font-weight:600; letter-spacing:.5px;
-  background:#f5f5f4; color:var(--ink2);
+  display:inline-flex; align-items:center; gap:6px;
+  padding:3px 9px 3px 8px; border-radius:20px;
+  font-size:11.5px; font-weight:600;
+  background:var(--surface-2); color:var(--ink-3);
   border:1px solid var(--line);
 }
-.verdict .dot{
-  width:9px; height:9px; border-radius:50%;
-  background:var(--ink3); flex:0 0 auto;
-}
+.verdict i{width:6px; height:6px; border-radius:50%; background:var(--ink-3)}
 .verdict.on{
-  background:var(--blue-soft); color:var(--blue); border-color:#dbeafe;
+  background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line);
 }
-.verdict.on .dot{
-  background:var(--blue);
-  box-shadow:0 0 0 4px rgba(37,99,235,.14);
-}
+.verdict.on i{background:var(--accent); box-shadow:0 0 0 3px rgba(37,99,235,.15)}
 
-.action{
-  margin-top:14px; font-size:13.5px; color:var(--ink2); min-height:21px;
-}
-.action b{color:var(--ink); font-weight:600}
+.vs{display:flex; align-items:baseline; letter-spacing:-1.6px; margin-top:2px}
+.vs b{font-size:52px; font-weight:650; line-height:1.05}
+.vs i{font-size:22px; font-style:normal; color:var(--ink-3); margin-left:2px; letter-spacing:-.5px}
+.vs-cap{margin-top:3px; font-size:11.5px; color:var(--ink-3)}
 
-/* ---------- 二、两只票 ---------- */
-.picks{
-  display:grid; grid-template-columns:1fr 1fr; gap:12px;
-  flex:0 0 auto;
+.rail-wrap{margin-top:14px; position:relative}
+.rail{width:100%; height:56px; display:block}
+
+.rail-cap{
+  margin-top:6px; font-size:11px; color:var(--ink-3);
+  display:flex; justify-content:space-between; gap:8px;
 }
+.hint{
+  margin-top:11px; padding:9px 11px; border-radius:8px;
+  background:var(--surface-2); font-size:12px; color:var(--ink-2);
+  line-height:1.5;
+}
+.hint b{color:var(--ink); font-weight:600}
+.hint.on{background:var(--accent-soft)}
+.hint.on b{color:var(--accent)}
+
+/* ---------- 两只票 ---------- */
+.picks{display:grid; grid-template-columns:1fr 1fr; gap:10px}
 .pick{
-  background:var(--card); border:1px solid var(--line); border-radius:var(--r);
-  padding:16px 16px 15px; position:relative; overflow:hidden;
+  border:1px solid var(--line); border-radius:9px; padding:11px 12px 10px;
+  background:var(--surface-2); min-width:0;
 }
-.pick .tag{
-  position:absolute; top:0; left:0;
-  font-size:10.5px; letter-spacing:1.5px; color:var(--ink3);
-  padding:7px 12px;
+.pick-h{display:flex; align-items:center; justify-content:space-between; gap:6px}
+.pick-tag{font-size:10px; letter-spacing:1px; color:var(--ink-3)}
+.pick-rank{font-size:10px; color:var(--ink-3)}
+.pick-nm{
+  margin-top:5px; font-size:15px; font-weight:640; letter-spacing:-.2px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
-.pick .nm{
-  margin-top:20px; font-size:18px; font-weight:640; letter-spacing:-.2px;
+.pick-cd{font-size:10.5px; color:var(--ink-3); letter-spacing:.5px}
+.pick-px{margin-top:7px; display:flex; align-items:baseline; gap:6px}
+.pick-px b{font-size:16px; font-weight:650}
+.pick-px em{font-style:normal; font-size:10.5px; color:var(--ink-3)}
+.pick-px .chg{margin-left:auto; font-size:11.5px; font-weight:600}
+.fac{
+  margin-top:9px; padding-top:8px; border-top:1px dashed var(--line);
+  display:flex; gap:4px;
 }
-.pick .cd{
-  margin-top:3px; font-size:11.5px; color:var(--ink3);
-  font-variant-numeric:tabular-nums; letter-spacing:.6px;
+.fac div{flex:1; min-width:0}
+.fac span{display:block; font-size:9.5px; color:var(--ink-3); letter-spacing:.2px;white-space:nowrap}
+.fac b{display:block; font-size:11.5px; font-weight:600; color:var(--ink-2); margin-top:1px}
+
+.up{color:var(--up)}
+.down{color:var(--down)}
+.flat{color:var(--ink-3)}
+
+/* ---------- 持仓 ---------- */
+.pos-empty{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  font-size:12px; color:var(--ink-3); line-height:1.5;
 }
-.pick .px{
-  margin-top:12px; font-size:15px; font-weight:600;
-  font-variant-numeric:tabular-nums;
+.btn{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:7px 13px; border-radius:8px; font-size:12.5px; font-weight:600;
+  border:1px solid var(--line); background:var(--surface); color:var(--ink-2);
+  transition:.15s; white-space:nowrap;
 }
-.pick .px i{
-  font-style:normal; font-size:11px; color:var(--ink3);
-  font-weight:400; margin-left:4px;
+.btn:hover{background:var(--surface-2); color:var(--ink)}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+
+.pos-bar{
+  height:5px; border-radius:3px; background:var(--line-2); overflow:hidden;
+  margin:10px 0 8px;
+}
+.pos-bar i{
+  display:block; height:100%; border-radius:3px;
+  background:var(--accent); transition:width .4s ease;
+}
+.pos-row{
+  display:flex; justify-content:space-between; font-size:11.5px; color:var(--ink-3);
+}
+.pos-row b{color:var(--ink-2); font-weight:600}
+.pos-items{display:flex; flex-direction:column; gap:4px}
+.pos-item{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  font-size:12px;
+}
+.pos-item .pi-n{color:var(--ink-2)}
+.pos-item .pi-p{color:var(--ink-3); font-size:10.5px; margin-left:auto}
+.pos-item .pi-r{font-weight:600; flex:0 0 44px; text-align:right}
+
+
+/* ---------- 规则 ---------- */
+/* 2×2 而不是竖排四条：竖排会多出 60~70px，左栏一超过右栏，
+   整页就从「一屏」变成「要滚一点」—— 而那点滚动没有任何信息价值。 */
+.rules{display:grid; grid-template-columns:1fr 1fr; gap:1px 12px}
+.rules div{
+  display:flex; align-items:baseline; gap:7px;
+  padding:4px 0; font-size:11.5px; min-width:0;
+}
+.rules span{flex:0 0 24px; color:var(--ink-3); font-size:10.5px}
+.rules b{
+  color:var(--ink-2); font-weight:550; line-height:1.35;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 
-/* ---------- 三、历史 ---------- */
-.hist{
-  border-top:1px solid var(--line); padding-top:20px;
-  margin-top:24px; flex:0 0 auto;
+/* ---------- 图表 ---------- */
+.seg{
+  display:inline-flex; padding:2px; gap:1px;
+  background:var(--surface-2); border-radius:7px; border:1px solid var(--line);
 }
-.hist canvas{width:100%; height:140px; display:block}
-.facts{
-  margin-top:12px; display:flex; gap:22px;
-  font-size:12px; color:var(--ink3); font-variant-numeric:tabular-nums;
-  flex-wrap:wrap;
+.seg button{
+  padding:3px 9px; border-radius:5px; font-size:11px; color:var(--ink-3);
+  transition:.12s;
 }
-.facts b{
-  display:block; font-size:15px; color:var(--ink2);
-  font-weight:600; margin-bottom:1px;
-}
+.seg button:hover{color:var(--ink-2)}
+.seg button.on{background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.06)}
 
-footer{
-  margin-top:18px; font-size:11px; color:var(--ink3);
-  display:flex; justify-content:space-between; letter-spacing:.3px;
-  flex:0 0 auto;
+.chart-wrap{position:relative}
+#cv{width:100%; height:186px; display:block; cursor:crosshair}
+.tip{
+  position:absolute; pointer-events:none; z-index:5;
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:8px; padding:7px 9px; font-size:11.5px;
+  box-shadow:0 4px 14px rgba(0,0,0,.10);
+  transform:translate(-50%,-100%); white-space:nowrap;
 }
+.tip .t-d{color:var(--ink-3); font-size:10.5px; margin-bottom:2px}
+.tip .t-v{font-weight:650; font-size:13px}
+.tip .t-s{color:var(--ink-3); font-size:10.5px; margin-top:1px}
 
-/* ---------- 高度不够时：先保内容完整，再谈留白 ----------
-   1366×768 的笔记本、上下分屏、浏览器侧边栏开着，可用高度常常只有 500~650。
-   这套压缩把内容从约 720px 收到约 590px（最矮档约 470px），
-   同时保持三块的层级关系不变：只缩间距和字号，不删内容。 */
-@media (max-height:820px){
-  #app{padding-top:16px; padding-bottom:16px}
-  .hero{padding-bottom:16px}
-  .vs b{font-size:54px}
-  .vs i{font-size:23px}
-  .vs-cap{margin-top:6px}
-  .verdict{margin-top:16px; padding:8px 18px; font-size:15px}
-  .action{margin-top:11px}
-  .pick{padding:13px 14px 13px}
-  .pick .nm{margin-top:17px; font-size:17px}
-  .pick .px{margin-top:9px}
-  .hist{margin-top:18px; padding-top:14px}
-  .hist canvas{height:112px}
-  .facts{margin-top:9px}
-  footer{margin-top:12px}
+.stats{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:8px;
+  margin-top:12px; padding-top:11px; border-top:1px solid var(--line-2);
 }
+.stats div span{display:block; font-size:10.5px; color:var(--ink-3); letter-spacing:.2px}
+.stats div b{display:block; font-size:14px; font-weight:650; margin-top:2px}
 
-/* 视口比内容还矮（分屏、小窗）：允许滚动，但顶部必须可见 ——
-   所以这里只缩尺寸，不引入任何居中或负 margin。 */
-@media (max-height:640px){
-  #app{padding-top:12px; padding-bottom:12px}
-  .hero{padding-bottom:12px}
-  .vs b{font-size:42px; line-height:1}
-  .vs i{font-size:18px}
-  .verdict{margin-top:12px; padding:6px 15px; font-size:14px}
-  .action{margin-top:9px; font-size:12.5px}
-  .pick{padding:11px 12px 11px}
-  .pick .nm{margin-top:15px; font-size:15.5px}
-  .pick .px{margin-top:7px; font-size:14px}
-  .hist{margin-top:14px; padding-top:12px}
-  .hist canvas{height:84px}
-  .facts{margin-top:8px; gap:18px}
-  .facts b{font-size:14px}
-  footer{margin-top:10px}
+#yc{width:100%; height:100px; display:block}
+
+/* ---------- 表格 ---------- */
+.card-flat{padding-bottom:6px}
+.tablewrap{
+  max-height:210px; overflow:auto; margin:0 -4px;
+  scrollbar-width:thin;
 }
+.tablewrap::-webkit-scrollbar{width:6px}
+.tablewrap::-webkit-scrollbar-thumb{background:var(--line); border-radius:3px}
+
+.tbl{width:100%; border-collapse:collapse; font-size:11.5px}
+.tbl th{
+  position:sticky; top:0; z-index:1;
+  background:var(--surface); color:var(--ink-3); font-weight:500;
+  font-size:10.5px; letter-spacing:.2px; text-align:left;
+  padding:5px 6px 6px; border-bottom:1px solid var(--line);
+}
+.tbl td{padding:4px 6px; border-bottom:1px solid var(--line-2); vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr:hover td{background:var(--surface-2)}
+.tbl .num{text-align:right}
+.tbl th:nth-child(1),.tbl td:nth-child(1){width:70px;white-space:nowrap}
+.tbl th:nth-child(2),.tbl td:nth-child(2){width:52px}
+.tbl th:nth-child(4),.tbl td:nth-child(4){width:56px;white-space:nowrap}
+.tbl th:nth-child(5),.tbl td:nth-child(5){width:56px;white-space:nowrap}
+.buy-pair{display:flex; flex-direction:column; line-height:1.24; font-size:10.5px}
+.buy-pair i{
+  font-style:normal; color:var(--ink-3);
+  display:flex; justify-content:space-between; gap:10px;
+}
+.buy-pair i b{font-weight:550}
+.pend{color:var(--ink-3); font-size:10.5px}
+
+/* ---------- 页脚 ---------- */
+.foot{
+  display:flex; justify-content:space-between; gap:12px;
+  margin-top:auto; padding-top:14px;
+  font-size:10.5px; color:var(--ink-3); letter-spacing:.2px;
+}
+.foot-r{text-align:right}
 
 /* ---------- 窄屏 ---------- */
-@media (max-width:380px){
-  .vs b{font-size:56px}
+@media (max-width:1080px){
+  .grid{grid-template-columns:320px minmax(0,1fr)}
+  .vs b{font-size:46px}
+}
+@media (max-width:860px){
+  .app{padding:0 14px 18px}
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .vs b{font-size:52px}
+  .bar{flex-wrap:wrap; gap:10px}
+  .brand-t p{display:none}
+  .stamp{display:none}
+  .foot{flex-direction:column; gap:4px}
+  .foot-r{text-align:left}
+}
+@media (max-width:344px){
   .picks{grid-template-columns:1fr}
-  .pick .nm{font-size:17px}
-  .pick .nm{margin-top:18px}
+}
+@media (max-width:400px){
+  .stats{grid-template-columns:repeat(2,1fr); gap:10px}
 }
 
-/* 首屏进入时轻微上浮，不做花哨动画：这页面一年只打开几次 */
-@media (prefers-reduced-motion:no-preference){
-  .hero,.picks,.hist{animation:in .45s cubic-bezier(.22,.7,.3,1) both}
-  .picks{animation-delay:.06s}
-  .hist{animation-delay:.12s}
-  @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* ---------- 矮屏：压间距，不删内容 ---------- */
+@media (max-height:760px){
+  .bar{padding:9px 2px}
+  .grid{margin-top:10px; gap:11px}
+  .col{gap:11px}
+  .card{padding:11px 13px 12px}
+  .card-h{margin-bottom:9px}
+  .vs b{font-size:42px}
+  .rail{height:44px}
+  .rail-wrap{margin-top:10px}
+  .hint{margin-top:8px; padding:7px 9px; font-size:11.5px}
+  #cv{height:168px}
+  #yc{height:96px}
+  .stats{margin-top:9px; padding-top:9px}
+  .tablewrap{max-height:186px}
+  .foot{padding-top:10px}
 }

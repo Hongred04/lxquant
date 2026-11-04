@@ -469,6 +469,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": True, **json.loads(f.read_text(encoding="utf-8"))})
                 except Exception:
                     return self._json({"ok": False, "curve": []})
+            if p == "/api/fin/trades":
+                # 历史机会清单：每次大盘破位后买了什么、40 天后赚了多少。
+                # 离线算好存盘（70_dump_trades.py），这里只读 —— 它算一次要读 1 GB 长表。
+                try:
+                    f = config.DATA_DIR / "fin_trades.json"
+                    return self._json({"ok": True, **json.loads(f.read_text(encoding="utf-8"))})
+                except Exception:
+                    return self._json({"ok": False, "items": []})
+            if p == "/api/fin/pos":
+                # 持仓跟踪：买了没 / 第几天 / 还剩几天 / 现在赚多少
+                from . import fin_pos
+                return self._json({"ok": True, **fin_pos.view()})
             if p == "/" or p.startswith("/static") or p.endswith((".js", ".css", ".svg", ".ico", ".png", ".html")):
                 return self._static(p.replace("/static/", "/") if p.startswith("/static") else p,
                                     raw=q.get("raw") in ("1", "true"))
@@ -666,6 +678,27 @@ class Handler(BaseHTTPRequestHandler):
         p = urlparse(self.path).path
         b = self._body()
         try:
+            if p == "/api/fin/refresh":
+                # 强制重算（约 2 秒，日线走本地缓存）。页面的刷新按钮走这里：
+                # GET /api/fin 的 ensure() 在缓存还新鲜时不会重算，用户点了没动静
+                # 会以为是坏的 —— 那就把「点了就一定重算」做成独立接口。
+                from . import finance
+                r = finance.build()
+                if not r.get("ok"):
+                    return self._json({"ok": False, "msg": r.get("msg") or "重算失败"})
+                return self._json({"ok": True, **finance.view()})
+            if p == "/api/fin/pos":
+                # 标记「我按规则买了」/「卖掉了」。软件无法知道你下没下单，
+                # 只能让你点一下 —— 猜的话这笔记录立刻变脏，而它是唯一
+                # 能证明「策略在实盘里也成立」的东西。
+                from . import fin_pos
+                act = str(b.get("action") or "")
+                if act == "open":
+                    return self._json(fin_pos.open_pos(str(b.get("date") or ""),
+                                                       str(b.get("note") or "")))
+                if act == "close":
+                    return self._json(fin_pos.close_pos())
+                return self._json({"ok": False, "msg": "action 只能是 open / close"})
             if p == "/api/strategy/new":
                 # 生成一份策略模板到 data/strategies，用户用记事本改就行
                 from . import strategies as strats

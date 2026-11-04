@@ -73,3 +73,8 @@ data/fin_list.pkl
 data/long/
 data/long_all.pkl
 result_*.json
+
+# 用户持仓（私有，换机器不带走）
+data/fin_pos.json
+# 上证长历史（东财 8756 根，可重抓）
+data/idx_long.pkl

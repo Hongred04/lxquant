@@ -33,7 +33,7 @@ HOLD_DAYS = 40              # 持有 40 天后卖
 QUOTA = (("银行", 1), ("保险", 1))   # 买 1 银行 + 1 保险
 
 CACHE = DATA_DIR / "fin_state.json"
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 # 大金融池：按板块分组，板块内按代码排序（顺序固定，方便分位复现）
 POOL = {
@@ -121,6 +121,7 @@ def build() -> dict:
     raw = {}          # code -> (ma60, std20, corr20)
     meta = {}         # code -> (name, board)
     price = {}
+    chg = {}          # code -> 当日涨跌幅（%），卡片上要显示，不给的话只能看到价格没有方向
     failed = 0
     for board, items in POOL.items():
         for code, name in items:
@@ -135,7 +136,10 @@ def build() -> dict:
                     continue
                 raw[code] = f
                 meta[code] = (name, board)
-                price[code] = float(df["close"].iloc[-1])
+                c = df["close"].astype(float)
+                price[code] = float(c.iloc[-1])
+                prev = float(c.iloc[-2]) if len(c) > 1 else 0.0
+                chg[code] = round((price[code] / prev - 1) * 100, 2) if prev > 0 else 0.0
             except Exception:
                 failed += 1
 
@@ -167,20 +171,37 @@ def build() -> dict:
     # ---- 3. 择时 ----
     ix = ds.index_daily("sh000001")
     ix = ix.sort_values("date")
+    # 索引必须是日期：index_daily 返回的是 RangeIndex，直接拿 items() 会得到
+    # 行号（画出来横轴全是 1022 这种数字）。
     close = ix["close"].astype(float)
-    ma20 = close.tail(20).mean()
-    vs20 = float((close.iloc[-1] / ma20 - 1) * 100)
+    close.index = ix["date"].astype(str).str[:10].values
+    spot = float(close.iloc[-1])
+    ma20 = float(close.tail(20).mean())
+    ma60 = float(close.tail(60).mean())
+    vs20 = float((spot / ma20 - 1) * 100)
+    vs60 = float((spot / ma60 - 1) * 100)
     allow = vs20 < -GATE
+
+    # 最近 120 天的偏离度序列：界面上画成一条迷你轨道图，
+    # 让「现在离进场线还有多远」变成看得见的位置，而不是只有一个百分数。
+    ser = ((close / close.rolling(20, min_periods=10).mean() - 1) * 100).tail(120)
 
     # ---- 4. 按配额选股 ----
     picks = []
     for board, k in QUOTA:
         cand = [c for c in score if meta[c][1] == board]
         cand.sort(key=lambda c: -score[c])
-        for c in cand[:k]:
+        total = len(cand)
+        for n, c in enumerate(cand[:k], 1):
             picks.append({
                 "code": c, "name": meta[c][0], "board": board,
                 "score": round(score[c], 0), "price": round(price[c], 2),
+                "chg": chg.get(c, 0.0),
+                # 三条因子的原始值一起给出：卡片上要能回答「为什么是它」
+                "ma60r": round((raw[c][0] - 1) * 100, 1),
+                "std20": round(raw[c][1] * 100, 2),
+                "corr20": round(raw[c][2], 2),
+                "rank": n, "rank_total": total,
             })
 
     data = {
@@ -192,6 +213,15 @@ def build() -> dict:
         "allow": bool(allow),
         "hold_days": HOLD_DAYS,
         "picks": picks,
+        "market": {
+            "spot": round(spot, 2),
+            "ma20": round(ma20, 2),
+            "ma60": round(ma60, 2),
+            "vs60": round(vs60, 2),
+            # 还差多少才到进场线：0 表示已经到了
+            "gap": round(max(0.0, GATE - abs(vs20)), 2),
+            "ser": [[str(d), round(float(v), 2)] for d, v in ser.items()],
+        },
         "scanned": len(raw),
         "failed": failed,
         "elapsed": round(time.time() - t0, 1),

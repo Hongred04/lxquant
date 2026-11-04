@@ -1,39 +1,153 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#fafaf9">
+<meta name="theme-color" content="#fbfbfa">
 <title>大金融中长线</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<main id="app">
+<div class="boot" id="boot">
+  <div class="boot-i"></div>
+  <p>正在读取行情…</p>
+</div>
 
-  <div class="boot" id="boot">正在算…</div>
+<div class="app" id="app" hidden>
 
-  <section class="hero" id="hero" hidden>
-    <div class="vs">
-      <b id="vs-num">—</b><i>%</i>
+  <header class="bar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div class="brand-t">
+        <h1>大金融中长线</h1>
+        <p>大盘跌破 20 日线 2% 时，买 1 银行 + 1 保险，拿 40 天</p>
+      </div>
     </div>
-    <div class="vs-cap">大盘比 20 日线</div>
-    <div class="verdict" id="verdict">
-      <span class="dot"></span><span id="verdict-txt">—</span>
+    <div class="bar-r">
+      <div class="mkt" title="上证指数最新收盘">
+        <span class="mkt-k">上证</span>
+        <b id="mkt-spot">—</b>
+        <span class="mkt-v" id="mkt-chg">—</span>
+      </div>
+      <div class="stamp"><span>数据截至</span><b id="asof">—</b></div>
+      <button class="icon-btn" id="btn-refresh" title="重新算一遍">
+        <svg viewBox="0 0 16 16" width="15" height="15"><path d="M13.6 8a5.6 5.6 0 1 1-1.6-3.9M13.6 2v3.2h-3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-theme" title="切换深浅色">
+        <svg viewBox="0 0 16 16" width="15" height="15"><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.2v1.4M8 13.4v1.4M14.8 8h-1.4M2.6 8H1.2M12.8 3.2l-1 1M4.2 11.8l-1 1M12.8 12.8l-1-1M4.2 4.2l-1-1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
     </div>
-    <div class="action" id="action"></div>
-  </section>
+  </header>
 
-  <section class="picks" id="picks" hidden></section>
+  <main class="grid">
 
-  <section class="hist" id="hist" hidden>
-    <canvas id="cv" height="150"></canvas>
-    <div class="facts" id="facts"></div>
-  </section>
+    <!-- ================= 左栏 ================= -->
+    <div class="col">
 
-  <footer id="foot"></footer>
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">进场信号</span>
+          <span class="verdict" id="verdict"><i></i><b>—</b></span>
+        </div>
 
-</main>
+        <div class="vs"><b id="vs-num">—</b><i>%</i></div>
+        <div class="vs-cap">上证相对 20 日均线</div>
+
+        <div class="rail-wrap">
+          <canvas class="rail" id="rail"></canvas>
+        </div>
+        <div class="rail-cap" id="rail-cap">—</div>
+
+        <div class="hint" id="hint"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">今天买这两只</span>
+          <span class="card-sub" id="pick-sub">—</span>
+        </div>
+        <div class="picks" id="picks"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">我的持仓</span>
+          <span class="card-sub" id="pos-sub"></span>
+        </div>
+        <div id="pos-body"></div>
+      </section>
+
+      <section class="card" id="card-rules">
+        <div class="card-h">
+          <span class="card-t">规则</span>
+          <span class="card-sub">写死，不给调</span>
+        </div>
+        <div class="rules">
+          <div><span>进场</span><b>跌超 MA20 2%</b></div>
+          <div><span>选股</span><b>银行 1 + 保险 1</b></div>
+          <div><span>持有</span><b>40 个交易日</b></div>
+          <div><span>仓位</span><b>两只各一半</b></div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ================= 右栏 ================= -->
+    <div class="col">
+
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">净值曲线</span>
+          <div class="seg" id="seg">
+            <button data-r="1">1 年</button>
+            <button data-r="3">3 年</button>
+            <button data-r="0" class="on">全部</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="cv"></canvas>
+          <div class="tip" id="tip" hidden></div>
+        </div>
+        <div class="stats" id="stats"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-h">
+          <span class="card-t">每年赚多少</span>
+          <span class="card-sub" id="year-sub">—</span>
+        </div>
+        <canvas class="yearly" id="yc"></canvas>
+      </section>
+
+      <section class="card card-flat">
+        <div class="card-h">
+          <span class="card-t">历史机会</span>
+          <span class="card-sub" id="trade-sub">—</span>
+        </div>
+        <div class="tablewrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>进场日</th>
+              <th class="num">大盘</th>
+              <th>买入的两只</th>
+              <th class="num">40 天后</th>
+              <th class="num">同期上证</th>
+            </tr></thead>
+            <tbody id="trades"></tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span id="foot-l">—</span>
+    <span class="foot-r">回测 2016-01 ~ 2026-11 · 43 只大金融 · 前复权 · 已扣 0.35% 往返成本</span>
+  </footer>
+
+</div>
 
 <script src="app.js"></script>
 </body>
