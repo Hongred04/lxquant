@@ -63,3 +63,23 @@ def test_index_close_ends_on_closed_day():
     if (now.hour, now.minute) < (15, 10):
         assert last < now.strftime("%Y-%m-%d"), f"盘中却返回了今天 {last}"
     assert px.index.is_monotonic_increasing, "日期必须有序"
+
+
+def test_allow_needs_both_gates():
+    """两个条件缺一不可。
+
+    · 只破 20 日线（-3）、年线还在高位（+5）：这是普通回调，2008 上半年全是这种，
+      买了就被埋，不能放行；
+    · 只破年线（-10）、20 日线刚反弹到 +1：跌久了但当天不恐慌，也不放行；
+    · 两个都破：放行。
+    """
+    assert finance._allow(-3.0, 5.0) is False
+    assert finance._allow(1.0, -10.0) is False
+    assert finance._allow(-3.0, -10.0) is True
+
+
+def test_allow_boundary_is_strict():
+    """恰好等于阈值不算（−2.00 / −8.00 要"超"过）。"""
+    assert finance._allow(-2.0, -8.0) is False
+    assert finance._allow(-2.01, -8.0) is False
+    assert finance._allow(-2.01, -8.01) is True

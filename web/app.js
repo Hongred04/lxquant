@@ -93,33 +93,56 @@ function renderBar(f) {
 }
 
 /* ---------------- 进场信号 ---------------- */
+function setCond(sel, v, gate) {
+  const box = $(sel);
+  if (!box) return { ok: false, gap: NaN };
+  const ok = isFinite(v) && v < -gate;
+  box.classList.toggle('ok', ok);
+  box.querySelector('.cond-v').textContent =
+    isFinite(v) ? sgn(v) + v.toFixed(2) + '%' : '—';
+  box.querySelector('.cond-need i').textContent = gate.toFixed(2);
+  // 用后端算好的 gap；算不出来时退回 v + gate（从均线上方跌下来时这个才对）
+  return { ok, gap: Math.max(0, isFinite(v) ? v + gate : NaN) };
+}
+
 function renderDecision(f) {
-  const v = +f.vs20;
-  $('#vs-num').textContent = sgn(v) + v.toFixed(2);
+  const m = f.market || {};
+  const gate = +f.gate || 2;
+  const gate250 = +f.gate250 || 8;
+  const c20 = setCond('#cond20', +f.vs20, gate);
+  const c250 = setCond('#cond250', m.vs250 == null ? NaN : +m.vs250, gate250);
 
   const on = !!f.allow;
   const vd = $('#verdict');
   vd.className = 'verdict' + (on ? ' on' : '');
   vd.querySelector('b').textContent = on ? '可以买' : '等待';
 
-  const gate = f.gate;
   const hint = $('#hint');
   if (on) {
     hint.className = 'hint on';
-    hint.innerHTML = `已跌破 <b>−${gate}%</b>，可以买。两只各一半，拿满 `
+    hint.innerHTML = `两个条件都满足，可以买。两只各一半，拿满 `
       + `<b>${f.hold_days} 天</b>；中途跌破 <b>${f.stop_pct}%</b> 先卖。`;
   } else {
-    // 用后端算好的 gap，不要在界面上重算：从均线上方跌下来时
-    // 「还差多少」= v + gate，用 gate - |v| 会把 3.2 算成 0.8。
-    const gap = (f.market && f.market.gap != null)
-      ? (+f.market.gap).toFixed(2) : Math.max(0, v + gate).toFixed(2);
+    // 说清楚「卡在哪一条」，而不是只给一个笼统的"还没到"。
+    // 两个 gap 都来自后端（_gap），前端只负责措辞。
+    const g20 = m.gap != null ? +m.gap : c20.gap;
+    const g250 = m.gap250 != null ? +m.gap250 : c250.gap;
     hint.className = 'hint';
-    hint.innerHTML = `还差 <b>${gap} 个百分点</b>才到进场线（−${gate}%），现在不在窗口内。`;
+    if (!c20.ok && !c250.ok) {
+      hint.innerHTML = `两个条件都还没到：20 日线还差 <b>${g20.toFixed(2)}</b> 个点，`
+        + `年线还差 <b>${g250.toFixed(2)}</b> 个点。`;
+    } else if (!c20.ok) {
+      hint.innerHTML = `年线已经到位，但 20 日线还差 <b>${g20.toFixed(2)} 个百分点</b>，`
+        + `现在买是接下跌中的刀。`;
+    } else {
+      hint.innerHTML = `20 日线已经到位，但年线还差 <b>${g250.toFixed(2)} 个百分点</b> ——`
+        + `大盘没跌到"系统性便宜"的位置，这种回调里大金融通常不反弹。`;
+    }
   }
 
-  const ser = (f.market && f.market.ser) || [];
+  const ser = (m.ser) || [];
   $('#rail-cap').innerHTML = `<span>近 ${ser.length} 个交易日</span>`
-    + `<span>虚线 = 进场线 −${gate}%</span>`;
+    + `<span>虚线 = 20 日线进场线 −${gate}%</span>`;
 }
 
 /* 偏离度轨道图：把「现在离进场线多远」画成位置，而不是只给一个数 */
@@ -466,7 +489,8 @@ function renderTrades(t) {
       <b class="${p.ret == null ? 'flat' : dir(p.ret)}">${p.ret == null ? '—' : pct(p.ret)}</b></i>`).join('');
     return `<tr>
       <td>${esc(it.date)}</td>
-      <td class="num">${(+it.vs20).toFixed(1)}%</td>
+      <td class="num">${(+it.vs20).toFixed(1)}%${
+        it.vs250 == null ? '' : `<i class="sub-num">${(+it.vs250).toFixed(1)}%</i>`}</td>
       <td><div class="buy-pair">${pair}</div></td>
       <td class="num">${it.ret == null
         ? '<span class="pend">未到期</span>'

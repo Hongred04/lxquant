@@ -78,3 +78,9 @@ result_*.json
 data/fin_pos.json
 # 上证长历史（东财 8756 根，可重抓）
 data/idx_long.pkl
+
+# 大金融全历史日线（后复权，2.7 MB）：tools/fetch_fin.py 可重建
+data/fin_long.pkl
+
+# 验证截图（无头 Edge 拍的，随手可重拍）
+shots/

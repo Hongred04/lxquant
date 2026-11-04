@@ -155,6 +155,28 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .vs i{font-size:22px; font-style:normal; color:var(--ink-3); margin-left:2px; letter-spacing:-.5px}
 .vs-cap{margin-top:3px; font-size:11.5px; color:var(--ink-3)}
 
+/* 两个进场条件并列。原来只有一个大数字（20 日线偏离），加了年线门槛之后
+   还留一个大数字会误导 —— 用户会以为「跌到 -2% 就能买」。 */
+.conds{margin-top:8px}
+.cond{
+  display:flex; align-items:baseline; gap:9px;
+  padding:8px 0; border-top:1px solid var(--line);
+}
+.cond:first-child{border-top:none; padding-top:4px}
+.cond-k{width:50px; flex:none; font-size:11.5px; color:var(--ink-3)}
+.cond-v{
+  font-size:27px; font-weight:600; letter-spacing:-.9px;
+  font-variant-numeric:tabular-nums; line-height:1.1;
+}
+.cond-need{
+  margin-left:auto; font-size:11px; color:var(--ink-3);
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.cond-need i{font-style:normal}
+.cond.ok .cond-v, .cond.ok .cond-need{color:var(--accent)}
+/* 机会表里第二行：年线偏离，弱化成脚注，不抢第一行 */
+.sub-num{display:block; font-style:normal; font-size:10px; color:var(--ink-3); line-height:1.3}
+
 .rail-wrap{margin-top:14px; position:relative}
 .rail{width:100%; height:56px; display:block}
 
@@ -322,7 +344,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   font-style:normal; color:var(--ink-3);
   display:flex; justify-content:space-between; gap:10px;
 }
-.buy-pair i b{font-weight:550}
+.buy-pair i b{font-weight:500; opacity:.9}
+/* 单票收益紧挨着右边两列（40天后 / 同期上证），数字颜色一样、都是右对齐，
+   一眼会读成三个并列的汇总值。给第三列留出空隙，把「明细」和「汇总」分开。 */
+.tbl td:nth-child(3),.tbl th:nth-child(3){padding-right:16px}
 .pend{color:var(--ink-3); font-size:10.5px}
 
 /* ---------- 页脚 ---------- */

@@ -21,7 +21,7 @@
       <span class="logo" aria-hidden="true"></span>
       <div class="brand-t">
         <h1>大金融中长线</h1>
-        <p>大盘跌破 20 日线 2% 时，买 1 银行 + 1 保险，拿 40 天</p>
+        <p>大盘跌破 20 日线 2%、且跌破年线 8% 时，买 1 银行 + 1 保险，拿 40 天</p>
       </div>
     </div>
     <div class="bar-r">
@@ -51,8 +51,18 @@
           <span class="verdict" id="verdict"><i></i><b>—</b></span>
         </div>
 
-        <div class="vs"><b id="vs-num">—</b><i>%</i></div>
-        <div class="vs-cap">上证相对 20 日均线</div>
+        <div class="conds">
+          <div class="cond" id="cond20">
+            <span class="cond-k">20 日线</span>
+            <b class="cond-v">—</b>
+            <span class="cond-need">需 −<i>2.00</i>%</span>
+          </div>
+          <div class="cond" id="cond250">
+            <span class="cond-k">年线</span>
+            <b class="cond-v">—</b>
+            <span class="cond-need">需 −<i>8.00</i>%</span>
+          </div>
+        </div>
 
         <div class="rail-wrap">
           <canvas class="rail" id="rail"></canvas>
@@ -84,7 +94,7 @@
           <span class="card-sub">写死，不给调</span>
         </div>
         <div class="rules">
-          <div><span>进场</span><b>跌超 MA20 2%</b></div>
+          <div><span>进场</span><b>MA20 −2% 且年线 −8%</b></div>
           <div><span>选股</span><b>银行 1 + 保险 1</b></div>
           <div><span>卖出</span><b>40 天/亏 8%</b></div>
           <div><span>仓位</span><b>两只各一半</b></div>
@@ -129,7 +139,7 @@
           <table class="tbl">
             <thead><tr>
               <th>进场日</th>
-              <th class="num" title="进场那天上证相对 20 日均线的偏离，不是当日涨跌">偏离</th>
+              <th class="num" title="进场那天上证相对 20 日均线（上）和年线（下）的偏离，不是当日涨跌">偏离</th>
               <th>买入的两只</th>
               <th class="num">40 天后</th>
               <th class="num">同期上证</th>
@@ -144,7 +154,7 @@
 
   <footer class="foot">
     <span id="foot-l">—</span>
-    <span class="foot-r">回测 2016-01 ~ 2026-11 · 43 只大金融 · 前复权 · 已扣 0.35% 往返成本</span>
+    <span class="foot-r">回测 2007-03 ~ 2026-11 · 43 只大金融 · 后复权 · 已扣 0.35% 往返成本</span>
   </footer>
 
 </div>
