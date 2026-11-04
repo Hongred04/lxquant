@@ -25,20 +25,32 @@ async function api(path, body) {
 }
 
 /* ---------------- 启动 ---------------- */
+let tries = 0;
+
 async function boot() {
   try {
     const [fin, hist, trades, pos] = await Promise.all([
       api('/api/fin'), api('/api/fin/history'),
       api('/api/fin/trades'), api('/api/fin/pos'),
     ]);
-    if (!fin || !fin.ready) { setTimeout(boot, 2000); return; }
+    if (!fin || !fin.ready) { retry(); return; }
     S.fin = fin; S.hist = hist; S.trades = trades; S.pos = pos;
     $('#boot').hidden = true;
     $('#app').hidden = false;
     renderAll();
   } catch (_) {
-    setTimeout(boot, 2500);
+    retry();
   }
+}
+
+/* 最多重试 30 次（约 1 分钟）。原来是无上限的，服务没起来时页面会永远转圈，
+   用户分不清「在算」和「坏了」。 */
+function retry() {
+  if (++tries > 30) {
+    $('#boot').innerHTML = '<p>算不出来。看看控制台窗口有没有报错，或刷新页面重试。</p>';
+    return;
+  }
+  setTimeout(boot, tries < 5 ? 1500 : 3000);
 }
 
 function renderAll() {
@@ -49,6 +61,9 @@ function renderAll() {
   renderStats(S.hist);
   renderTrades(S.trades);
   requestAnimationFrame(paintAll);
+  // 兜底：首帧如果 canvas 还没拿到宽度（字体/布局未完成），图会画成空白且不会自己恢复。
+  // 这里补一次，代价是 120ms 后重画一遍，肉眼看不出来。
+  setTimeout(paintAll, 120);
 }
 
 function paintAll() {
@@ -62,11 +77,18 @@ function renderBar(f) {
   const m = f.market || {};
   $('#mkt-spot').textContent = m.spot == null ? '—' : (+m.spot).toFixed(2);
   const el = $('#mkt-chg');
-  const chg = +f.vs20;
+  // 这里是「当日涨跌」。曾经用 f.vs20（相对 20 日线）顶替过 ——
+  // 它紧挨着指数点位，任何人都会读成「今天涨了几个点」，属于会误导决策的错误。
+  const chg = m.chg == null ? 0 : +m.chg;
   el.textContent = sgn(chg) + chg.toFixed(2) + '%';
   el.className = 'mkt-v ' + dir(chg);
-  el.title = '相对 20 日均线';
+  el.title = '当日涨跌（相对 20 日线看左栏）';
   $('#asof').textContent = f.asof || '—';
+  // 盘中打开时 asof 是昨收。不说清楚，用户会以为「今天的数据」已经算进去了。
+  const today = new Date().toLocaleDateString('sv-SE');
+  $('#asof').title = f.asof && f.asof < today
+    ? '今天还没收盘，信号用的是最近收盘价'
+    : '收盘数据';
   $('#foot-l').textContent = `选股池 ${f.scanned} 只 · 算一次 ${f.elapsed} 秒`;
 }
 
@@ -87,10 +109,12 @@ function renderDecision(f) {
     hint.innerHTML = `已跌破 <b>−${gate}%</b>，在进场窗口内。`
       + `按规则买下面两只、各一半，拿满 <b>${f.hold_days} 个交易日</b>。`;
   } else {
-    const gap = (gate - Math.abs(v)).toFixed(2);
+    // 用后端算好的 gap，不要在界面上重算：从均线上方跌下来时
+    // 「还差多少」= v + gate，用 gate - |v| 会把 3.2 算成 0.8。
+    const gap = (f.market && f.market.gap != null)
+      ? (+f.market.gap).toFixed(2) : Math.max(0, v + gate).toFixed(2);
     hint.className = 'hint';
-    hint.innerHTML = `还差 <b>${gap} 个百分点</b>才到进场线（−${gate}%）。`
-      + `现在买属于提前，历史上提前买的平均收益明显更差。`;
+    hint.innerHTML = `还差 <b>${gap} 个百分点</b>才到进场线（−${gate}%），现在不在窗口内。`;
   }
 
   const ser = (f.market && f.market.ser) || [];
@@ -164,7 +188,7 @@ function renderPicks(f) {
       <div class="pick-cd">${esc(p.code)}</div>
       <div class="pick-px">
         <b>${(+p.price).toFixed(2)}</b><em>元</em>
-        <span class="chg ${dir(p.chg)}">${sgn(p.chg)}${(+p.chg).toFixed(2)}%</span>
+        <span class="chg ${dir(p.chg)}" title="当日涨跌（数据截至 ${esc(f.asof || '')}）">${sgn(p.chg)}${(+p.chg).toFixed(2)}%</span>
       </div>
       <div class="fac">
         <div><span>超跌</span><b>${pct(p.ma60r)}</b></div>
@@ -198,7 +222,7 @@ function renderPos(p) {
   const cls = dir(a.ret);
   // 持仓状态比空状态多出四行内容，左栏一长整页就要滚 —— 所以这里刻意压成
   // 两行文字 + 一条进度 + 一行两只票，不写「第几天」和「还剩几天」各占一行。
-  $('#pos-sub').textContent = a.due ? '已到期待卖' : `第 ${a.held} / ${HOLD} 天`;
+  $('#pos-sub').textContent = a.due ? '已到期待卖' : `已拿 ${a.held} / ${HOLD} 天`;
 
   box.innerHTML = `
     <div class="pos-row">
@@ -211,7 +235,7 @@ function renderPos(p) {
       ${(a.items || []).map(it => `
         <div class="pos-item">
           <span class="pi-n">${esc(it.name)}</span>
-          <span class="pi-p">${it.buy} → ${it.now}</span>
+          <span class="pi-p" title="左边是记录那一刻的最新价，可能和你实际成交价有出入；右边是现在">${it.buy} → ${it.now}</span>
           <span class="pi-r ${dir(it.ret)}">${pct(it.ret)}</span>
         </div>`).join('')}
     </div>
@@ -498,6 +522,7 @@ $('#btn-theme').onclick = () => {
 let rt = null;
 window.addEventListener('resize', () => {
   clearTimeout(rt);
+  $('#tip').hidden = true;     // 缩放后 tooltip 会停在旧位置，先收起来
   rt = setTimeout(paintAll, 120);
 });
 

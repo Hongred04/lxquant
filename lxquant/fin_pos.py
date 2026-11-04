@@ -37,7 +37,7 @@ def _load() -> dict:
 def _save(d: dict) -> None:
     d = dict(d, v=VERSION)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = POS.with_suffix(".json.tmp")
+    tmp = POS.parent / (POS.name + ".tmp")
     tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, POS)
 
@@ -101,8 +101,10 @@ def close_pos() -> dict:
     if not act:
         return {"ok": False, "msg": "当前没有持仓"}
     row = _settle(act)
-    hist = (cur.get("history") or [])[:50]
+    # 先插再截断：原来写的是「先取 50 条再插入」，结果每次多一条，永远 51。
+    hist = list(cur.get("history") or [])
     hist.insert(0, row)
+    hist = hist[:50]
     _save({"active": None, "history": hist})
     return {"ok": True, **view()}
 

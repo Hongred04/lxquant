@@ -342,8 +342,15 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   .foot{flex-direction:column; gap:4px}
   .foot-r{text-align:left}
 }
+/* 320 这类极窄屏：表格 5 列放不下（实测溢出 16px），砍掉最次要的「同期上证」；
+   顶栏的上证标签也省掉，否则一行塞不下会折成两块。 */
 @media (max-width:344px){
   .picks{grid-template-columns:1fr}
+  .mkt-k{display:none}
+  .tbl th:nth-child(5),.tbl td:nth-child(5){display:none}
+  .tbl th:nth-child(1),.tbl td:nth-child(1){width:62px}
+  .tbl th:nth-child(2),.tbl td:nth-child(2){width:44px}
+  .tbl th:nth-child(4),.tbl td:nth-child(4){width:50px}
 }
 @media (max-width:400px){
   .stats{grid-template-columns:repeat(2,1fr); gap:10px}

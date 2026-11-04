@@ -25,6 +25,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime
 
 from .config import DATA_DIR
 
@@ -76,12 +77,92 @@ _LOCK = threading.Lock()
 _LAST_TRY = [0.0]
 
 
+def _drop_unclosed(df, col: str = "date", now=None):
+    """丢掉「今天还没收盘」的那根日线。
+
+    行情接口在盘中就会返回一根日期是今天的 K 线，值是实时价。拿它算 vs20 / std20，
+    等于让信号随盘中价格漂移：上午 10 点显示「可以买」，下午 2 点可能变「再等等」，
+    而用户看到的都是「今天的信号」—— 同一句话两小时后自我否定。
+
+    这套规则的决策基准是**收盘价**（收盘后看信号、次日开盘买），
+    所以 15:10 之前一律用昨收。留 10 分钟给数据源把收盘价落定。
+    """
+    if df is None or not len(df):
+        return df
+    now = now or datetime.now()
+    if (now.hour, now.minute) >= (15, 10):
+        return df
+    today = now.strftime("%Y-%m-%d")
+    s = df[col].astype(str).str[:10]
+    return df[s < today].reset_index(drop=True)
+
+
+def _gap(vs20: float, gate: float) -> float:
+    """离进场线还差几个百分点；0 表示已经在窗口里。
+
+    只测过三种错法：`gate - |vs20|`（均线上方时把 3.2 算成 0.8）、
+    `-vs20 - gate`（已跌破时算出 0.89 这种正数）、忘记 max。
+    正确就是 `vs20 + gate` 再截 0。
+    """
+    return round(max(0.0, vs20 + gate), 2)
+
+
+def _index_close():
+    """上证收盘价序列：本地长表打底，新浪补最新，再裁掉未收盘的那根。
+
+    为什么不能只用 `datasource.index_daily`：它走新浪，`datalen` 上限 1023 根
+    = 4.2 年。个股有 10.8 年、指数只有 4.2 年，拼在一起就是「10 年回测实际
+    只跑了 4 年」（2022 年之前 vs20 全 NaN，被当成空仓）。
+
+    两家在重叠日期的收盘价最大差 0.005（四舍五入），所以拼接是安全的。
+    """
+    import pandas as pd
+    from . import datasource as ds
+
+    px = None
+    f = DATA_DIR / "idx_long.pkl"
+    if f.exists():
+        try:
+            d = pd.read_pickle(f)
+            px = d.set_index("date")["close"].astype(float)
+        except Exception:
+            px = None
+
+    try:
+        a = ds.index_daily("sh000001")
+        a["date"] = a["date"].astype(str).str[:10]
+        s = a.set_index("date")["close"].astype(float)
+        if px is None or len(px) < 200:
+            px = s
+        elif len(s) and s.index[-1] > px.index[-1]:
+            px = pd.concat([px, s[s.index > px.index[-1]]])
+    except Exception:
+        pass
+
+    if px is None or not len(px):
+        raise RuntimeError("拿不到上证指数")
+
+    px = px[~px.index.duplicated(keep="last")].sort_index()
+    now = datetime.now()
+    if (now.hour, now.minute) < (15, 10):
+        px = px[px.index < now.strftime("%Y-%m-%d")]
+    return px
+
+
 def _probe() -> str:
-    """日线缓存最新到哪天。"""
+    """日线缓存最新到哪天（只算已收盘的）。
+
+    这里必须和 build() 用同一套口径。原来直接取最后一根，盘中会拿到今天的
+    实时价那根，于是 `asof(昨收) < probe(今天)` 永远成立 → ensure() 认为
+    「缓存过期」，每 60 秒重算一遍，白烧 CPU 而结果一个字都不变。
+    """
     try:
         import pandas as pd
         from .config import CACHE_DIR
         df = pd.read_pickle(CACHE_DIR / "d_000001.pkl")
+        df = _drop_unclosed(df)
+        if df is None or not len(df):
+            return ""
         return str(df["date"].iloc[-1])[:10]
     except Exception:
         return ""
@@ -93,7 +174,9 @@ def _factors(df):
 
     c = df["close"].astype(float)
     v = df["volume"].astype(float)
-    if len(c) < 40:
+    # 必须 60 根：ma60 是 c.tail(60).mean()，只有 40 根时 pandas 会静默算成
+    # 40 日均线，把「上市两个月的新股」判成「跌破 60 日线」—— 凭空给高分。
+    if len(c) < 60:
         return None
     ret = c.pct_change()
     # 除权/异常：最近 20 天有 |涨跌|>21% 的算不准，跳过
@@ -127,6 +210,7 @@ def build() -> dict:
         for code, name in items:
             try:
                 df = store.get_kline(code, "day", 120)
+                df = _drop_unclosed(df)
                 if df is None or len(df) < 40:
                     failed += 1
                     continue
@@ -169,17 +253,17 @@ def build() -> dict:
             score[c] = float(v)
 
     # ---- 3. 择时 ----
-    ix = ds.index_daily("sh000001")
-    ix = ix.sort_values("date")
-    # 索引必须是日期：index_daily 返回的是 RangeIndex，直接拿 items() 会得到
-    # 行号（画出来横轴全是 1022 这种数字）。
-    close = ix["close"].astype(float)
-    close.index = ix["date"].astype(str).str[:10].values
+    # 用 _index_close()：长表打底（10.8 年）+ 新浪补最新 + 裁掉未收盘的那根。
+    # 原来直接调 index_daily，盘中拿到的是「今天还没收盘」的实时价，
+    # 而且只有 4.2 年 —— 前者让信号漂移，后者让回测缩水。
+    close = _index_close()
     spot = float(close.iloc[-1])
+    prev = float(close.iloc[-2]) if len(close) > 1 else spot
     ma20 = float(close.tail(20).mean())
     ma60 = float(close.tail(60).mean())
     vs20 = float((spot / ma20 - 1) * 100)
     vs60 = float((spot / ma60 - 1) * 100)
+    ix_chg = float((spot / prev - 1) * 100) if prev > 0 else 0.0
     allow = vs20 < -GATE
 
     # 最近 120 天的偏离度序列：界面上画成一条迷你轨道图，
@@ -206,7 +290,7 @@ def build() -> dict:
 
     data = {
         "v": CACHE_VERSION,
-        "asof": str(ix["date"].iloc[-1])[:10],
+        "asof": str(close.index[-1])[:10],
         "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "vs20": round(vs20, 2),
         "gate": GATE,
@@ -215,11 +299,18 @@ def build() -> dict:
         "picks": picks,
         "market": {
             "spot": round(spot, 2),
+            # 当日涨跌：顶栏要和「上证 3604」并排显示，不能拿 vs20 顶替 ——
+            # vs20 是「相对 20 日线」，和「今天涨了几个点」是两件事，
+            # 位置挨在一起，用户一定读成当日涨跌。
+            "chg": round(ix_chg, 2),
             "ma20": round(ma20, 2),
             "ma60": round(ma60, 2),
             "vs60": round(vs60, 2),
-            # 还差多少才到进场线：0 表示已经到了
-            "gap": round(max(0.0, GATE - abs(vs20)), 2),
+            # 还差多少才到进场线：0 表示已经到了。
+            # 公式是 vs20 + GATE（跌破时为负、取 0），不是「GATE - |vs20|」——
+            # 后者在均线上方会算错（v=+1.2 时还差 3.2，不是 0.8），
+            # 而前者取反写（-vs20-GATE）会在已跌破时算出 0.89 这种鬼数字。
+            "gap": _gap(vs20, GATE),
             "ser": [[str(d), round(float(v), 2)] for d, v in ser.items()],
         },
         "scanned": len(raw),
@@ -227,7 +318,7 @@ def build() -> dict:
         "elapsed": round(time.time() - t0, 1),
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE.with_suffix(".json.tmp")
+    tmp = CACHE.parent / (CACHE.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, CACHE)
     _LAST_TRY[0] = time.time()
@@ -259,7 +350,10 @@ def ensure() -> None:
     """缓存没有或在 10 分钟内过旧就后台重算。"""
     d = load()
     day = _probe()
-    stale = (not d) or (day and d.get("asof") and d["asof"] < day)
+    # asof 缺失（老版本缓存/文件被改坏）必须当成过期 —— 原来写成
+    # `d.get("asof") and ...`，缺字段时整个表达式是 None，判成「不过期」，
+    # 于是一份没有日期的缓存会被永远用下去。
+    stale = (not d) or (not d.get("asof")) or (day and d["asof"] < day)
     if not stale or time.time() - _LAST_TRY[0] < (10 if not d else 60):
         return
     if not _LOCK.acquire(blocking=False):
