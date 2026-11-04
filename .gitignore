@@ -84,3 +84,6 @@ data/fin_long.pkl
 
 # 验证截图（无头 Edge 拍的，随手可重拍）
 shots/
+
+# 本目录是 WorkBuddy 的会话记忆/临时区，不属于代码
+.workbuddy/
